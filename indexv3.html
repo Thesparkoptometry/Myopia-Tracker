@@ -81,8 +81,25 @@
       "Monitoring": { bg: "#f1f5f9", text: "#475569", border: "#94a3b8" },
       "AL Only":    { bg: "#fff1f2", text: "#9f1239", border: "#fda4af" },
     };
-    const EVENT_TYPES_CLINICAL = ["Program Follow Up","AL Measurement","Refraction","Lens Fit","Follow-up Visit","Yearly Comprehensive Exam","Myopia Consult","Treatment Change","Medical Visit","Topography","Phone/Email Consult","Other Clinical"];
-    const EVENT_TYPES_ADMIN = ["Rx Renewal","Insurance Auth","Lens Order","Warranty Registered","Parent Communication","No Show","Payment","Ortho-K Warranty Expiry","Other Admin"];
+
+    // Defaults — overridden by settings from Firebase
+    const DEFAULT_CLINICAL_TYPES = [
+      "Program Follow Up","AL Measurement","Refraction","Lens Fit",
+      "Follow-up Visit","Yearly Comprehensive Exam","Myopia Consult",
+      "Treatment Change","Medical Visit","Topography","Phone/Email Consult","Other Clinical"
+    ];
+    const DEFAULT_ADMIN_TYPES = [
+      "Program Renewal","Payment","Lens Order - Warranted","Lens Order - Non-Warranted",
+      "Rx Renewal","Insurance Auth","Parent Communication","Ortho-K Warranty Expiry",
+      "Other Admin","No Show"
+    ];
+    const DEFAULT_BV_TESTS = [
+      "Near Phoria (eso/exo)","Distance Phoria","MEM","NPC","Stereo","NRA/PRA",
+      "Vergence Ranges (BI)","Vergence Ranges (BO)","AC/A Ratio","Other BV"
+    ];
+
+    const PARENT_MYOPIA_OPTS = ["Unknown","None","Mild (-1 to -3)","Moderate (-3 to -6)","High (> -6)"];
+    const BV_RISK_OPTS = ["Not assessed","Normal","Monitor","Significant"];
 
     function uid() { return Math.random().toString(36).slice(2, 9); }
     function today() { return new Date().toISOString().slice(0, 10); }
@@ -103,9 +120,9 @@
       const weeks = Math.floor(remAfterMonths / 7);
       const days = remAfterMonths % 7;
       const parts = [];
-      if (years > 0)  parts.push(`${years} yr`);
+      if (years > 0) parts.push(`${years} yr`);
       if (months > 0) parts.push(`${months} mo`);
-      if (weeks > 0)  parts.push(`${weeks} wk`);
+      if (weeks > 0) parts.push(`${weeks} wk`);
       if (days > 0 && years === 0 && months === 0) parts.push(`${days} d`);
       return parts.join(" ") || "0 d";
     }
@@ -132,13 +149,29 @@
       return parts.join(" ") || "< 1 mo";
     }
 
+    // Get most recent activity date for a patient
+    function getLastActivityDate(p) {
+      const dates = [
+        ...(p.alMeasurements||[]).map(x=>x.date),
+        ...(p.refractions||[]).map(x=>x.date),
+        ...(p.clinicalEvents||[]).map(x=>x.date),
+        ...(p.adminEvents||[]).map(x=>x.date),
+        ...(p.lensHistory||[]).map(x=>x.date),
+        ...(p.bvEntries||[]).map(x=>x.date),
+      ].filter(Boolean);
+      return dates.length ? dates.sort().reverse()[0] : "";
+    }
+
     const DEMO_PATIENTS = [
       {
         id: "p1", name: "Marcus Chen", dob: "2014-03-15", location: "Fremont",
         therapy: "Ortho-K", combinationTherapy: "", status: "Active",
         initiatingDoctor: "Dr. Yang", managingDoctor: "Dr. Yang",
         therapyStartDate: "2022-02-01",
-        internalNotes: "Parent very engaged. Father is also myopic (-8.00). Push AL measurements Q3mo.",
+        staffAlert: "Father is also highly myopic. Push AL measurements Q3mo.",
+        notes: "Parent very engaged. Prefers email communication.",
+        parent1Myopia: "High (> -6)", parent2Myopia: "Mild (-1 to -3)",
+        bvRisk: "Normal",
         alMeasurements: [
           { id: "al1", date: "2022-01-10", od: 24.21, os: 24.18, notes: "Baseline" },
           { id: "al2", date: "2022-04-15", od: 24.35, os: 24.30, notes: "3 mo f/u" },
@@ -159,22 +192,17 @@
         ],
         lensHistory: [
           { id: "l1", date: "2022-02-01", type: "Ortho-K", odBC: 8.4, odPower: -3.25, odDiam: 10.5, odRZD1: 530, odRZD2: 530, odLZA1: 33, odLZA2: 33, odColor: "Green", osBC: 8.5, osPower: -3.00, osDiam: 10.5, osRZD1: 530, osRZD2: 530, osLZA1: 33, osLZA2: 33, osColor: "Blue", reason: "Initial fit" },
-          { id: "l2", date: "2023-02-10", type: "Ortho-K", odBC: 8.4, odPower: -3.50, odDiam: 10.5, odRZD1: 530, odRZD2: 530, odLZA1: 33, odLZA2: 33, odColor: "Green", osBC: 8.5, osPower: -3.25, osDiam: 10.5, osRZD1: 530, osRZD2: 530, osLZA1: 33, osLZA2: 33, osColor: "Blue", reason: "Power update" },
         ],
         clinicalEvents: [
-          { id: "ce1", date: "2022-01-10", type: "AL Measurement", notes: "Baseline visit. Discussed OrthoK candidacy." },
-          { id: "ce2", date: "2022-02-01", type: "Lens Fit", notes: "Initial Paragon CRT fit. Good centration." },
-          { id: "ce3", date: "2023-01-18", type: "Progress Check", notes: "Excellent control. AL growth slowing." },
-          { id: "ce4", date: "2024-01-08", type: "Follow-up Visit", notes: "Good topography map. Continuing same lenses." },
-          { id: "ce5", date: "2025-01-20", type: "Refraction", notes: "Annual comprehensive. No change in lens Rx needed." },
+          { id: "ce1", date: "2022-01-10", type: "AL Measurement", notes: "Baseline visit." },
+          { id: "ce2", date: "2022-02-01", type: "Lens Fit", notes: "Initial Paragon CRT fit." },
+          { id: "ce5", date: "2025-01-20", type: "Yearly Comprehensive Exam", notes: "Annual comprehensive." },
         ],
         adminEvents: [
-          { id: "ae1", date: "2022-02-05", type: "Lens Order", notes: "Paragon CRT ordered. ETA 2 weeks." },
-          { id: "ae2", date: "2022-02-05", type: "Warranty Registered", notes: "Paragon warranty registered. Expiry: 2022-06-05" },
+          { id: "ae1", date: "2022-02-05", type: "Lens Order - Warranted", notes: "Paragon CRT ordered." },
           { id: "ae3", date: "2023-01-20", type: "Rx Renewal", notes: "Annual renewal signed." },
-          { id: "ae4", date: "2023-02-15", type: "Lens Order", notes: "Updated lenses ordered." },
-          { id: "ae5", date: "2025-01-25", type: "Recall Sent", notes: "6 month recall sent via text." },
         ],
+        bvEntries: [],
         dismissedAlerts: [], warrantyOrderDate: "2023-02-15",
       },
       {
@@ -182,7 +210,10 @@
         therapy: "MiSight", combinationTherapy: "", status: "Active",
         initiatingDoctor: "Dr. Fan", managingDoctor: "Dr. Fan",
         therapyStartDate: "2021-10-01",
-        internalNotes: "Mom asks lots of questions. Send post-visit summary email each time.",
+        staffAlert: "",
+        notes: "Mom asks lots of questions. Send post-visit summary email each time.",
+        parent1Myopia: "Moderate (-3 to -6)", parent2Myopia: "None",
+        bvRisk: "Monitor",
         alMeasurements: [
           { id: "al1", date: "2021-09-05", od: 24.50, os: 24.45, notes: "Baseline" },
           { id: "al2", date: "2022-03-10", od: 24.72, os: 24.67, notes: "" },
@@ -195,24 +226,18 @@
         refractions: [
           { id: "r1", date: "2021-09-05", odSph: -2.50, odCyl: 0, odAxis: 0, odVA: "20/20", osSph: -2.25, osCyl: -0.25, osAxis: 90, osVA: "20/20" },
           { id: "r2", date: "2022-09-08", odSph: -3.00, odCyl: 0, odAxis: 0, odVA: "20/20", osSph: -2.75, osCyl: -0.25, osAxis: 90, osVA: "20/20" },
-          { id: "r3", date: "2023-09-20", odSph: -3.25, odCyl: -0.25, odAxis: 5, odVA: "20/20", osSph: -3.00, osCyl: -0.25, osAxis: 90, osVA: "20/20" },
-          { id: "r4", date: "2024-09-18", odSph: -3.50, odCyl: -0.25, odAxis: 5, odVA: "20/20", osSph: -3.25, osCyl: -0.25, osAxis: 90, osVA: "20/20" },
+          { id: "r3", date: "2024-09-18", odSph: -3.50, odCyl: -0.25, odAxis: 5, odVA: "20/20", osSph: -3.25, osCyl: -0.25, osAxis: 90, osVA: "20/20" },
         ],
-        lensHistory: [
-          { id: "l1", date: "2021-10-01", type: "MiSight", odBC: 8.7, odPower: -2.50, odDiam: 14.2, odColor: "", osBC: 8.7, osPower: -2.25, osDiam: 14.2, osColor: "", reason: "Initial fit" },
-          { id: "l2", date: "2022-10-05", type: "MiSight", odBC: 8.7, odPower: -3.00, odDiam: 14.2, odColor: "", osBC: 8.7, osPower: -2.75, osDiam: 14.2, osColor: "", reason: "Annual Rx update" },
-          { id: "l3", date: "2023-10-10", type: "MiSight", odBC: 8.7, odPower: -3.25, odDiam: 14.2, odColor: "", osBC: 8.7, osPower: -3.00, osDiam: 14.2, osColor: "", reason: "Annual Rx update" },
-        ],
+        lensHistory: [],
         clinicalEvents: [
-          { id: "ce1", date: "2021-09-05", type: "AL Measurement", notes: "Baseline. Good candidate for MiSight." },
-          { id: "ce2", date: "2022-03-10", type: "Follow-up Visit", notes: "Adapting well to lenses." },
-          { id: "ce3", date: "2023-03-15", type: "Progress Check", notes: "Moderate control. AL growth ~0.3/yr." },
-          { id: "ce4", date: "2024-03-12", type: "Follow-up Visit", notes: "Discussed possible switch to Stellest given progression." },
+          { id: "ce1", date: "2021-09-05", type: "AL Measurement", notes: "Baseline." },
+          { id: "ce4", date: "2024-03-12", type: "Follow-up Visit", notes: "Discussed possible switch to Stellest." },
         ],
         adminEvents: [
           { id: "ae1", date: "2021-10-01", type: "Rx Renewal", notes: "Annual supply ordered." },
-          { id: "ae2", date: "2022-10-05", type: "Lens Order", notes: "Updated Rx supply." },
-          { id: "ae3", date: "2024-09-20", type: "Recall Sent", notes: "Annual recall." },
+        ],
+        bvEntries: [
+          { id: "bv1", date: "2024-03-12", results: { "Near Phoria (eso/exo)": "4 eso", "MEM": "+0.50", "NPC": "5 cm", "Stereo": "40 sec arc" }, notes: "Mild esophoria at near" }
         ],
         dismissedAlerts: [], warrantyOrderDate: null,
       },
@@ -221,31 +246,29 @@
         therapy: "Atropine", combinationTherapy: "", status: "Active",
         initiatingDoctor: "Dr. Ghag", managingDoctor: "Dr. Ghag",
         therapyStartDate: "2023-02-20",
-        internalNotes: "Ortho-K not suitable — compliance concern. On 0.05% atropine. Monitor for rebound.",
+        staffAlert: "Compliance concern — check in at every visit",
+        notes: "Ortho-K not suitable. On 0.05% atropine. Monitor for rebound.",
+        parent1Myopia: "High (> -6)", parent2Myopia: "Mild (-1 to -3)",
+        bvRisk: "Not assessed",
         alMeasurements: [
           { id: "al1", date: "2023-02-14", od: 23.80, os: 23.75, notes: "Baseline" },
           { id: "al2", date: "2023-08-10", od: 23.95, os: 23.91, notes: "" },
           { id: "al3", date: "2024-02-20", od: 24.05, os: 24.01, notes: "" },
-          { id: "al4", date: "2024-08-15", od: 24.12, os: 24.09, notes: "" },
           { id: "al5", date: "2025-02-10", od: 24.18, os: 24.16, notes: "" },
         ],
         refractions: [
           { id: "r1", date: "2023-02-14", odSph: -1.75, odCyl: -0.50, odAxis: 90, odVA: "20/20", osSph: -1.50, osCyl: -0.50, osAxis: 85, osVA: "20/20" },
-          { id: "r2", date: "2024-02-20", odSph: -2.00, odCyl: -0.50, odAxis: 90, odVA: "20/20", osSph: -1.75, osCyl: -0.50, osAxis: 85, osVA: "20/20" },
-          { id: "r3", date: "2025-02-10", odSph: -2.25, odCyl: -0.50, odAxis: 90, odVA: "20/20", osSph: -2.00, osCyl: -0.50, osAxis: 85, osVA: "20/20" },
+          { id: "r2", date: "2025-02-10", odSph: -2.25, odCyl: -0.50, odAxis: 90, odVA: "20/20", osSph: -2.00, osCyl: -0.50, osAxis: 85, osVA: "20/20" },
         ],
         lensHistory: [],
         clinicalEvents: [
           { id: "ce1", date: "2023-02-14", type: "AL Measurement", notes: "Baseline. Started 0.05% atropine." },
-          { id: "ce2", date: "2023-08-10", type: "Follow-up Visit", notes: "Tolerating well. No photophobia reported." },
-          { id: "ce3", date: "2024-02-20", type: "Progress Check", notes: "Good control. ~0.25/yr AL growth." },
-          { id: "ce4", date: "2025-02-10", type: "Follow-up Visit", notes: "Continued good response. Renew Rx." },
+          { id: "ce4", date: "2025-02-10", type: "Follow-up Visit", notes: "Continued good response." },
         ],
         adminEvents: [
           { id: "ae1", date: "2023-02-20", type: "Rx Renewal", notes: "0.05% atropine compounded. 3mo supply." },
-          { id: "ae2", date: "2023-05-20", type: "Rx Renewal", notes: "Refill." },
-          { id: "ae3", date: "2025-02-15", type: "Rx Renewal", notes: "Annual renewal with updated Rx." },
         ],
+        bvEntries: [],
         dismissedAlerts: [], warrantyOrderDate: null,
       },
     ];
@@ -265,10 +288,7 @@
             const expiryA = isExpired ? now : expiryDt;
             const expiryB = isExpired ? expiryDt : now;
             const timeStr = durationLabel(expiryB, expiryA);
-            const warrantyLabel = isExpired
-              ? `Ortho-K warranty expired ${timeStr} ago (${fmtDate(expiryDt.toISOString().slice(0,10))})`
-              : `Ortho-K warranty expires in ${timeStr} (${fmtDate(expiryDt.toISOString().slice(0,10))})`;
-            alerts.push({ id: alertId, patientId: p.id, patientName: p.name, type: "warranty", label: warrantyLabel, severity: daysLeft < 14 ? "high" : "medium" });
+            alerts.push({ id: alertId, patientId: p.id, patientName: p.name, type: "warranty", label: isExpired ? `Ortho-K warranty expired ${timeStr} ago` : `Ortho-K warranty expires in ${timeStr}`, severity: daysLeft < 14 ? "high" : "medium" });
           }
         }
         const als = [...(p.alMeasurements || [])].sort((a, b) => a.date.localeCompare(b.date));
@@ -311,10 +331,10 @@
         tableRows.push({ label: t.label === "Baseline" ? "Baseline" : durationLabel(parseDate(closest.date), latestDt), date: closest.date, dOD: latest.od - closest.od, dOS: latest.os - closest.os });
       }
       const clinicalNotes = (patient.clinicalEvents || []).filter(e => { const ed = parseDate(e.date); return ed >= baselineDt && ed <= latestDt; }).map(e => `${fmtDate(e.date)}: ${e.type}${e.notes ? " — " + e.notes : ""}`);
-      let interp = annualOD <= 0.10 ? "AL growth is minimal and may indicate near-stabilization. Continue current management and reassess annually."
-        : annualOD <= 0.20 ? "AL growth is below the high-risk threshold. Current treatment appears to be providing good control. Continue and monitor."
-        : annualOD <= 0.30 ? "AL growth is moderate. Current treatment is providing some benefit. Consider whether intensification or combination therapy is warranted."
-        : "AL growth exceeds 0.30 mm/yr, which is a concern. Evaluate treatment escalation or combination therapy. Parental counseling recommended.";
+      let interp = annualOD <= 0.10 ? "AL growth is minimal and may indicate near-stabilization."
+        : annualOD <= 0.20 ? "AL growth is below the high-risk threshold. Current treatment appears to be providing good control."
+        : annualOD <= 0.30 ? "AL growth is moderate. Consider whether intensification or combination therapy is warranted."
+        : "AL growth exceeds 0.30 mm/yr. Evaluate treatment escalation or combination therapy.";
       const rxs = [...(patient.refractions || [])].sort((a, b) => a.date.localeCompare(b.date));
       const baselineRx = rxs[0], latestRx = rxs[rxs.length - 1];
       const fmtSph = (s) => s !== undefined ? `${Number(s) >= 0 ? "+" : ""}${Number(s).toFixed(2)}` : "–";
@@ -323,10 +343,10 @@
         const lStr = `OD ${fmtSph(latestRx.odSph)}${latestRx.odCyl && latestRx.odCyl !== 0 ? ` ${fmtSph(latestRx.odCyl)} ×${latestRx.odAxis}°` : " sph"} / OS ${fmtSph(latestRx.osSph)}${latestRx.osCyl && latestRx.osCyl !== 0 ? ` ${fmtSph(latestRx.osCyl)} ×${latestRx.osAxis}°` : " sph"}`;
         if (baselineRx && baselineRx.date !== latestRx.date) {
           const bStr = `OD ${fmtSph(baselineRx.odSph)} / OS ${fmtSph(baselineRx.osSph)}`;
-          rxSentence = ` Refractive error has progressed from ${bStr} at baseline to ${lStr} most recently, representing a change of ${fmtSph(Number(latestRx.odSph) - Number(baselineRx.odSph))} D OD and ${fmtSph(Number(latestRx.osSph) - Number(baselineRx.osSph))} D OS over the follow-up period.`;
+          rxSentence = ` Refractive error progressed from ${bStr} at baseline to ${lStr}, a change of ${fmtSph(Number(latestRx.odSph) - Number(baselineRx.odSph))} D OD and ${fmtSph(Number(latestRx.osSph) - Number(baselineRx.osSph))} D OS.`;
         } else { rxSentence = ` Current refractive error is ${lStr}.`; }
       }
-      const narrative = `${displayName(patient.name)} has been followed from baseline on ${fmtDate(baseline.date)} through the most recent visit on ${fmtDate(latest.date)} — a span of ${durationLabel(baselineDt, latestDt)}. Total axial length growth has been ${sgnFmt(totalOD)} mm OD and ${sgnFmt(totalOS)} mm OS, yielding an annualized rate of ${sgnFmt(annualOD)} mm/yr OD and ${sgnFmt(annualOS)} mm/yr OS. The most recent interval (${intervalLabel}) showed a change of ${sgnFmt(intervalOD)} mm OD and ${sgnFmt(intervalOS)} mm OS.${rxSentence}`;
+      const narrative = `${displayName(patient.name)} has been followed from baseline on ${fmtDate(baseline.date)} through ${fmtDate(latest.date)} — ${durationLabel(baselineDt, latestDt)}. Total axial length growth: ${sgnFmt(totalOD)} mm OD and ${sgnFmt(totalOS)} mm OS, yielding ${sgnFmt(annualOD)} mm/yr OD and ${sgnFmt(annualOS)} mm/yr OS. The most recent interval (${intervalLabel}) showed ${sgnFmt(intervalOD)} mm OD and ${sgnFmt(intervalOS)} mm OS.${rxSentence}`;
       return { narrative, tableRows, clinicalNotes, interpretation: interp, annualOD, annualOS, baseline, latest };
     }
 
@@ -335,14 +355,13 @@
     const inputStyle = { padding: "6px 8px", border: "1px solid #e2e8f0", borderRadius: 5, fontSize: 13, fontFamily: "Georgia, serif", width: "100%", boxSizing: "border-box" };
     const labelStyle = { display: "flex", flexDirection: "column", gap: 3, fontSize: 11, color: "#64748b", flex: "1 1 100px" };
     const formCard = { background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: "14px 16px", display: "flex", flexWrap: "wrap", gap: 10, alignItems: "flex-end" };
-    function btnStyle(bg) { return { background: bg, color: "#fff", border: "none", borderRadius: 6, padding: "7px 14px", cursor: "pointer", fontSize: 12, fontWeight: 600 }; }
+    function btnStyle(bg) { return { background: bg, color: "#fff", border: "none", borderRadius: 6, padding: "7px 14px", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "Georgia, serif" }; }
 
     function TherapyBadge({ therapy }) {
       const c = THERAPY_COLORS[therapy] || { bg: "#f3f4f6", text: "#374151", border: "#d1d5db" };
       return <span style={{ background: c.bg, color: c.text, border: `1px solid ${c.border}`, borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>{therapy}</span>;
     }
 
-    // ─── AL Graph — fixed with delayed draw and resize listener ───────────────
     function ALGraph({ patient }) {
       const canvasRef = useRef(null);
       const [tooltip, setTooltip] = useState(null);
@@ -363,7 +382,6 @@
         const minD = Math.min(...dates), maxD = Math.max(...dates);
         const toX = d => PAD.left + ((d - minD) / (maxD - minD || 1)) * (W - PAD.left - PAD.right);
         const toY = v => H - PAD.bottom - ((v - minV) / (maxV - minV || 1)) * (H - PAD.top - PAD.bottom);
-        // Grid lines
         ctx.strokeStyle = "#e2e8f0"; ctx.lineWidth = 1;
         for (let i = 0; i <= 4; i++) {
           const v = minV + (maxV - minV) * (i / 4), y = toY(v);
@@ -371,7 +389,6 @@
           ctx.fillStyle = "#94a3b8"; ctx.font = "10px sans-serif"; ctx.textAlign = "right";
           ctx.fillText(v.toFixed(2), PAD.left - 5, y + 4);
         }
-        // Therapy start line
         if (patient.therapyStartDate) {
           const startTs = parseDate(patient.therapyStartDate).getTime();
           if (startTs >= minD && startTs <= maxD) {
@@ -383,55 +400,39 @@
             ctx.fillText("Tx start", x, PAD.top - 5);
           }
         }
-        // Clinical event lines
-        (patient.clinicalEvents || []).map(e => parseDate(e.date).getTime()).filter(t => t >= minD && t <= maxD).forEach((t, idx) => {
+        // Tx Change events (yellow)
+        (patient.clinicalEvents || []).filter(e => e.type === "Treatment Change").map(e => parseDate(e.date).getTime()).filter(t => t >= minD && t <= maxD).forEach(t => {
           const x = toX(t);
           ctx.strokeStyle = "#fbbf24"; ctx.lineWidth = 1; ctx.setLineDash([3, 3]);
           ctx.beginPath(); ctx.moveTo(x, PAD.top); ctx.lineTo(x, H - PAD.bottom); ctx.stroke();
           ctx.setLineDash([]);
         });
-        // Rx lines
-        (patient.refractions || []).map(e => parseDate(e.date).getTime()).filter(t => t >= minD && t <= maxD).forEach((t, idx) => {
+        (patient.refractions || []).map(e => parseDate(e.date).getTime()).filter(t => t >= minD && t <= maxD).forEach(t => {
           const x = toX(t);
           ctx.strokeStyle = "#a78bfa"; ctx.lineWidth = 1; ctx.setLineDash([2, 4]);
           ctx.beginPath(); ctx.moveTo(x, PAD.top); ctx.lineTo(x, H - PAD.bottom); ctx.stroke();
           ctx.setLineDash([]);
         });
-        // OD line + dots
         ctx.strokeStyle = "#ef4444"; ctx.lineWidth = 2.5; ctx.beginPath();
         als.forEach((m, i) => { const x = toX(parseDate(m.date).getTime()), y = toY(m.od); i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y); }); ctx.stroke();
         als.forEach(m => { const x = toX(parseDate(m.date).getTime()), y = toY(m.od); ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.fillStyle = "#ef4444"; ctx.fill(); ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5; ctx.stroke(); });
-        // OS line + dots
         ctx.strokeStyle = "#3b82f6"; ctx.lineWidth = 2.5; ctx.beginPath();
         als.forEach((m, i) => { const x = toX(parseDate(m.date).getTime()), y = toY(m.os); i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y); }); ctx.stroke();
         als.forEach(m => { const x = toX(parseDate(m.date).getTime()), y = toY(m.os); ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.fillStyle = "#3b82f6"; ctx.fill(); ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5; ctx.stroke(); });
-        // Date labels
         ctx.fillStyle = "#64748b"; ctx.font = "10px sans-serif"; ctx.textAlign = "center";
         als.forEach(m => { ctx.fillText(m.date.slice(0, 7), toX(parseDate(m.date).getTime()), H - PAD.bottom + 16); });
-        // Legend
         const legY = H - 14;
         [[PAD.left, "#ef4444", "OD"], [PAD.left + 50, "#3b82f6", "OS"], [PAD.left + 100, "#fbbf24", "Tx Change"], [PAD.left + 185, "#a78bfa", "Rx visit"], [PAD.left + 250, "#22c55e", "Tx start"]].forEach(([x, col, label]) => {
           ctx.fillStyle = col; ctx.fillRect(x, legY - 4, 14, 4);
           ctx.fillStyle = "#374151"; ctx.font = "10px sans-serif"; ctx.textAlign = "left"; ctx.fillText(label, x + 18, legY);
         });
-        // Store hit points for tooltip
         const rxMap = {};
         (patient.refractions || []).forEach(r => { rxMap[r.date] = r; });
         pointsRef.current = als.map(m => ({ date: m.date, od: m.od, os: m.os, xOD: toX(parseDate(m.date).getTime()), yOD: toY(m.od), yOS: toY(m.os), rx: rxMap[m.date] || null }));
       }, [patient]);
 
-      // Draw with a small delay so canvas is in the DOM and laid out
-      useEffect(() => {
-        const t = setTimeout(() => drawGraph(), 60);
-        return () => clearTimeout(t);
-      }, [drawGraph]);
-
-      // Redraw on resize
-      useEffect(() => {
-        const onResize = () => drawGraph();
-        window.addEventListener("resize", onResize);
-        return () => window.removeEventListener("resize", onResize);
-      }, [drawGraph]);
+      useEffect(() => { const t = setTimeout(() => drawGraph(), 60); return () => clearTimeout(t); }, [drawGraph]);
+      useEffect(() => { const onResize = () => drawGraph(); window.addEventListener("resize", onResize); return () => window.removeEventListener("resize", onResize); }, [drawGraph]);
 
       const handleMouseMove = (e) => {
         const canvas = canvasRef.current;
@@ -476,6 +477,58 @@
       return <button onClick={onClick} style={{ background: active ? "rgba(255,255,255,0.18)" : "transparent", color: "#fff", border: active ? "1px solid rgba(255,255,255,0.35)" : "1px solid transparent", borderRadius: 6, padding: "6px 14px", cursor: "pointer", fontSize: 13, fontWeight: active ? 600 : 400 }}>{children}</button>;
     }
 
+    // ── Search / Home View ─────────────────────────────────────────────────────
+    function SearchView({ alerts, searchQ, setSearchQ, results, onSelect, onDismissAlert, recentPatients }) {
+      return (
+        <div style={{ maxWidth: 820, margin: "0 auto", padding: "28px 20px" }}>
+          <div style={{ background: "#fff", borderRadius: 14, boxShadow: "0 2px 12px rgba(0,0,0,0.07)", padding: "20px 24px", marginBottom: 20 }}>
+            <div style={{ fontSize: 13, color: "#64748b", marginBottom: 8, fontStyle: "italic" }}>Search by patient name</div>
+            <input value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Type a patient name…" style={{ width: "100%", padding: "11px 16px", fontSize: 16, border: "2px solid #e2e8f0", borderRadius: 8, outline: "none", fontFamily: "Georgia, serif", boxSizing: "border-box" }} autoFocus />
+            {searchQ && results.length > 0 && <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>{results.slice(0, 8).map(p => <PatientRow key={p.id} p={p} onSelect={onSelect} />)}</div>}
+            {searchQ && results.length === 0 && <div style={{ marginTop: 12, color: "#94a3b8", fontSize: 14 }}>No patients found.</div>}
+          </div>
+
+          {alerts.length > 0 && (
+            <div style={{ background: "#fff", borderRadius: 14, boxShadow: "0 2px 12px rgba(0,0,0,0.07)", padding: "18px 24px", marginBottom: 20 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: "#b45309", marginBottom: 12, display: "flex", alignItems: "center", gap: 6 }}>
+                ⚠️ Needs Attention <span style={{ background: "#fef3c7", color: "#92400e", borderRadius: 12, padding: "2px 8px", fontSize: 12, fontWeight: 600 }}>{alerts.length}</span>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {alerts.map(a => (
+                  <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, background: a.severity === "high" ? "#fff1f2" : "#fffbeb", border: `1px solid ${a.severity === "high" ? "#fecaca" : "#fde68a"}`, borderRadius: 8, padding: "10px 14px" }}>
+                    <span style={{ fontSize: 16 }}>{a.type === "warranty" ? "🛡" : "📈"}</span>
+                    <button onClick={() => onSelect(a.patientId)} style={{ background: "none", border: "none", cursor: "pointer", color: "#1d4ed8", fontWeight: 600, fontSize: 13, padding: 0 }}>{displayName(a.patientName)}</button>
+                    <span style={{ fontSize: 12, color: "#64748b", flex: 1 }}>{a.label}</span>
+                    <button onClick={() => onDismissAlert(a.id, a.patientId)} style={{ background: "none", border: "none", cursor: "pointer", color: "#94a3b8", fontSize: 16, padding: 0 }}>✕</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {recentPatients.length > 0 && (
+            <div style={{ background: "#fff", borderRadius: 14, boxShadow: "0 2px 12px rgba(0,0,0,0.07)", padding: "18px 24px" }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: "#0f4c75", marginBottom: 12 }}>🕐 Recent Patients</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {recentPatients.map(p => (
+                  <div key={p.id} onClick={() => onSelect(p.id)} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 10px", borderRadius: 8, cursor: "pointer", border: "1px solid #f1f5f9" }}
+                    onMouseEnter={e => e.currentTarget.style.background = "#f0f9ff"}
+                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                    <div style={{ flex: 1 }}>
+                      <span style={{ fontWeight: 600, fontSize: 14 }}>{displayName(p.name)}</span>
+                      <span style={{ fontSize: 12, color: "#64748b", marginLeft: 10 }}>{p.managingDoctor || p.initiatingDoctor}</span>
+                    </div>
+                    <TherapyBadge therapy={p.therapy} />
+                    <span style={{ fontSize: 11, color: "#94a3b8" }}>{fmtDate(getLastActivityDate(p))}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
     function PatientRow({ p, onSelect }) {
       return (
         <div onClick={() => onSelect(p.id)} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", border: "1px solid #e2e8f0", borderRadius: 10, cursor: "pointer", background: "#f8fafc" }}
@@ -497,45 +550,15 @@
       );
     }
 
-    function SearchView({ alerts, searchQ, setSearchQ, results, onSelect, onDismissAlert }) {
-      return (
-        <div style={{ maxWidth: 820, margin: "0 auto", padding: "28px 20px" }}>
-          <div style={{ background: "#fff", borderRadius: 14, boxShadow: "0 2px 12px rgba(0,0,0,0.07)", padding: "20px 24px", marginBottom: 20 }}>
-            <div style={{ fontSize: 13, color: "#64748b", marginBottom: 8, fontStyle: "italic" }}>Search by patient name</div>
-            <input value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Type a patient name…" style={{ width: "100%", padding: "11px 16px", fontSize: 16, border: "2px solid #e2e8f0", borderRadius: 8, outline: "none", fontFamily: "Georgia, serif", boxSizing: "border-box" }} autoFocus />
-            {searchQ && results.length > 0 && <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>{results.slice(0, 8).map(p => <PatientRow key={p.id} p={p} onSelect={onSelect} />)}</div>}
-            {searchQ && results.length === 0 && <div style={{ marginTop: 12, color: "#94a3b8", fontSize: 14 }}>No patients found.</div>}
-          </div>
-          {alerts.length > 0 && (
-            <div style={{ background: "#fff", borderRadius: 14, boxShadow: "0 2px 12px rgba(0,0,0,0.07)", padding: "18px 24px" }}>
-              <div style={{ fontWeight: 700, fontSize: 14, color: "#b45309", marginBottom: 12, display: "flex", alignItems: "center", gap: 6 }}>
-                ⚠️ Needs Attention <span style={{ background: "#fef3c7", color: "#92400e", borderRadius: 12, padding: "2px 8px", fontSize: 12, fontWeight: 600 }}>{alerts.length}</span>
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {alerts.map(a => (
-                  <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, background: a.severity === "high" ? "#fff1f2" : "#fffbeb", border: `1px solid ${a.severity === "high" ? "#fecaca" : "#fde68a"}`, borderRadius: 8, padding: "10px 14px" }}>
-                    <span style={{ fontSize: 16 }}>{a.type === "warranty" ? "🛡" : "📈"}</span>
-                    <button onClick={() => onSelect(a.patientId)} style={{ background: "none", border: "none", cursor: "pointer", color: "#1d4ed8", fontWeight: 600, fontSize: 13, padding: 0 }}>{displayName(a.patientName)}</button>
-                    <span style={{ fontSize: 12, color: "#64748b", flex: 1 }}>{a.label}</span>
-                    <button onClick={() => onDismissAlert(a.id, a.patientId)} style={{ background: "none", border: "none", cursor: "pointer", color: "#94a3b8", fontSize: 16, padding: 0 }}>✕</button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      );
-    }
-
-    function PatientListView({ patients, filters, setFilters, onSelect, searchQ, setSearchQ }) {
+    function PatientListView({ patients, filters, setFilters, onSelect, searchQ, setSearchQ, allLocations, allDoctors }) {
       return (
         <div style={{ maxWidth: 960, margin: "0 auto", padding: "24px 20px" }}>
           <div style={{ background: "#fff", borderRadius: 12, padding: "16px 20px", marginBottom: 16, boxShadow: "0 1px 6px rgba(0,0,0,0.06)", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
             <input value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Search name…" style={{ flex: "1 1 160px", padding: "8px 12px", border: "1px solid #e2e8f0", borderRadius: 6, fontSize: 13, fontFamily: "Georgia, serif" }} />
-            {["location", "therapy", "status", "doctor"].map(f => (
+            {[["location", allLocations], ["therapy", THERAPIES], ["status", STATUSES], ["doctor", allDoctors]].map(([f, opts]) => (
               <select key={f} value={filters[f]} onChange={e => setFilters(x => ({ ...x, [f]: e.target.value }))} style={{ flex: "1 1 130px", padding: "8px 10px", border: "1px solid #e2e8f0", borderRadius: 6, fontSize: 12 }}>
                 <option value="">All {f === "therapy" ? "Therapies" : f === "status" ? "Statuses" : f.charAt(0).toUpperCase() + f.slice(1) + "s"}</option>
-                {(f === "location" ? LOCATIONS : f === "therapy" ? THERAPIES : f === "status" ? STATUSES : DOCTORS).map(o => <option key={o}>{o}</option>)}
+                {opts.map(o => <option key={o}>{o}</option>)}
               </select>
             ))}
           </div>
@@ -558,28 +581,6 @@
           </div>
         </div>
       );
-    }
-
-    function EventCard({ ev, color, onRemove }) {
-      return (
-        <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "10px 12px", display: "flex", alignItems: "flex-start", gap: 8 }}>
-          <div style={{ width: 4, background: color, borderRadius: 2, alignSelf: "stretch", minHeight: 20, flexShrink: 0 }} />
-          <div style={{ flex: 1 }}>
-            <div style={{ display: "flex", justifyContent: "space-between" }}>
-              <span style={{ fontSize: 12, fontWeight: 700, color }}>{ev.type}</span>
-              <span style={{ fontSize: 11, color: "#94a3b8" }}>{fmtDate(ev.date)}</span>
-            </div>
-            {ev.notes && <div style={{ fontSize: 12, color: "#475569", marginTop: 3 }}>{ev.notes}</div>}
-          </div>
-          <button onClick={onRemove} style={{ background: "none", border: "none", cursor: "pointer", color: "#cbd5e1", fontSize: 14, padding: 0 }}>✕</button>
-        </div>
-      );
-    }
-
-    function fmtRx(sph, cyl, axis) {
-      const s = sph !== undefined ? `${sph >= 0 ? "+" : ""}${Number(sph).toFixed(2)}` : "–";
-      if (!cyl || cyl === 0) return <span>{s} sph</span>;
-      return <span>{s} {cyl >= 0 ? "+" : ""}{Number(cyl).toFixed(2)} ×{axis}°</span>;
     }
 
     function StoryModal({ story, onClose, patientName }) {
@@ -624,15 +625,15 @@
       );
     }
 
-    // ─── OverviewTab — always-visible stacked quick-add ───────────────────────
-    function OverviewTab({ patient, onUpdate }) {
+    // ── Overview Tab ──────────────────────────────────────────────────────────
+    function OverviewTab({ patient, onUpdate, clinicalTypes, adminTypes }) {
       const als = [...(patient.alMeasurements || [])].sort((a, b) => a.date.localeCompare(b.date));
       const latest = als[als.length - 1], baseline = als[0];
 
       const emptyAL   = () => ({ date: today(), od: "", os: "", notes: "" });
       const emptyRx   = () => ({ date: today(), odSph: "", odCyl: "", odAxis: "", odVA: "20/20", osSph: "", osCyl: "", osAxis: "", osVA: "20/20" });
-      const emptyClin = () => ({ date: today(), type: EVENT_TYPES_CLINICAL[0], notes: "" });
-      const emptyAdm  = () => ({ date: today(), type: EVENT_TYPES_ADMIN[0], notes: "" });
+      const emptyClin = () => ({ date: today(), type: (clinicalTypes||DEFAULT_CLINICAL_TYPES)[0], notes: "" });
+      const emptyAdm  = () => ({ date: today(), type: (adminTypes||DEFAULT_ADMIN_TYPES)[0], notes: "" });
 
       const [alForm,   setAlForm]   = useState(emptyAL());
       const [rxForm,   setRxForm]   = useState(emptyRx());
@@ -669,7 +670,6 @@
 
       return (
         <div>
-          {/* Quick Add */}
           <div style={{ marginBottom: 20 }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 10 }}>Quick Add</div>
 
@@ -688,30 +688,34 @@
               </div>
             </div>
 
-            {/* Rx */}
+            {/* Refraction — condensed: date on OD row, save button on OS row */}
             <div style={qs}>
               {qHdr("#6d28d9", "🔍", "Refraction")}
-              <div style={{ marginBottom: 8 }}>
-                <label style={{...labelStyle, display:"inline-flex", flexDirection:"column"}}>
-                  Date<input type="date" value={rxForm.date} onChange={e => setRxForm(f => ({...f,date:e.target.value}))} style={{...inputStyle,width:"auto"}} />
-                </label>
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "28px 1fr 1fr 1fr 1fr", gap: "4px 8px", alignItems: "center", marginBottom: 8 }}>
-                <div/><div style={{fontSize:10,color:"#64748b",fontWeight:700,textAlign:"center"}}>Sph</div><div style={{fontSize:10,color:"#64748b",fontWeight:700,textAlign:"center"}}>Cyl</div><div style={{fontSize:10,color:"#64748b",fontWeight:700,textAlign:"center"}}>Axis</div><div style={{fontSize:10,color:"#64748b",fontWeight:700,textAlign:"center"}}>VA</div>
-                <div style={{fontSize:12,fontWeight:700,color:"#ef4444"}}>OD</div>
+              <div style={{ display: "grid", gridTemplateColumns: "auto 60px 60px 54px 60px 80px", gap: "4px 8px", alignItems: "center" }}>
+                {/* Header row */}
+                <div style={{ fontSize: 10, color: "#64748b", fontWeight: 700 }}>Date</div>
+                <div style={{ fontSize: 10, color: "#64748b", fontWeight: 700, textAlign: "center" }}>Sph</div>
+                <div style={{ fontSize: 10, color: "#64748b", fontWeight: 700, textAlign: "center" }}>Cyl</div>
+                <div style={{ fontSize: 10, color: "#64748b", fontWeight: 700, textAlign: "center" }}>Axis</div>
+                <div style={{ fontSize: 10, color: "#64748b", fontWeight: 700, textAlign: "center" }}>VA</div>
+                <div></div>
+                {/* OD row — date field here */}
+                <input type="date" value={rxForm.date} onChange={e => setRxForm(f => ({...f,date:e.target.value}))} style={{ ...inputStyle, fontSize: 12 }} />
                 <input type="number" step="0.25" placeholder="-3.00" value={rxForm.odSph} onChange={e=>setRxForm(f=>({...f,odSph:e.target.value}))} style={{...inputStyle,textAlign:"center"}} />
                 <input type="number" step="0.25" placeholder="0.00" value={rxForm.odCyl} onChange={e=>setRxForm(f=>({...f,odCyl:e.target.value}))} style={{...inputStyle,textAlign:"center"}} />
                 <input type="number" step="1" placeholder="180" value={rxForm.odAxis} onChange={e=>setRxForm(f=>({...f,odAxis:e.target.value}))} style={{...inputStyle,textAlign:"center"}} />
                 <input placeholder="20/20" value={rxForm.odVA} onChange={e=>setRxForm(f=>({...f,odVA:e.target.value}))} style={{...inputStyle,textAlign:"center"}} />
-                <div style={{fontSize:12,fontWeight:700,color:"#3b82f6"}}>OS</div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#ef4444", textAlign: "right" }}>OD</div>
+                {/* OS row — save button here */}
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#3b82f6" }}>OS</div>
                 <input type="number" step="0.25" placeholder="-3.00" value={rxForm.osSph} onChange={e=>setRxForm(f=>({...f,osSph:e.target.value}))} style={{...inputStyle,textAlign:"center"}} />
                 <input type="number" step="0.25" placeholder="0.00" value={rxForm.osCyl} onChange={e=>setRxForm(f=>({...f,osCyl:e.target.value}))} style={{...inputStyle,textAlign:"center"}} />
                 <input type="number" step="1" placeholder="180" value={rxForm.osAxis} onChange={e=>setRxForm(f=>({...f,osAxis:e.target.value}))} style={{...inputStyle,textAlign:"center"}} />
                 <input placeholder="20/20" value={rxForm.osVA} onChange={e=>setRxForm(f=>({...f,osVA:e.target.value}))} style={{...inputStyle,textAlign:"center"}} />
-              </div>
-              <div style={{display:"flex",alignItems:"center"}}>
-                <button onClick={saveRx} style={btnStyle("#6d28d9")}>Save</button>
-                {savedBadge("rx")}
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <button onClick={saveRx} style={btnStyle("#6d28d9")}>Save</button>
+                  {savedBadge("rx")}
+                </div>
               </div>
             </div>
 
@@ -720,7 +724,7 @@
               {qHdr("#0369a1", "🩺", "Clinical Note")}
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
                 <label style={labelStyle}>Date<input type="date" value={clinForm.date} onChange={e=>setClinForm(f=>({...f,date:e.target.value}))} style={inputStyle} /></label>
-                <label style={{...labelStyle,flex:"1 1 160px"}}>Type<select value={clinForm.type} onChange={e=>setClinForm(f=>({...f,type:e.target.value}))} style={{...inputStyle,minWidth:0}}>{EVENT_TYPES_CLINICAL.map(t=><option key={t}>{t}</option>)}</select></label>
+                <label style={{...labelStyle,flex:"1 1 160px"}}>Type<select value={clinForm.type} onChange={e=>setClinForm(f=>({...f,type:e.target.value}))} style={{...inputStyle,minWidth:0}}>{(clinicalTypes||DEFAULT_CLINICAL_TYPES).map(t=><option key={t}>{t}</option>)}</select></label>
                 <label style={{...labelStyle,flex:"2 1 180px"}}>Notes<input value={clinForm.notes} onChange={e=>setClinForm(f=>({...f,notes:e.target.value}))} style={inputStyle} /></label>
                 <div style={{display:"flex",alignItems:"center"}}>
                   <button onClick={saveClin} style={btnStyle("#0369a1")}>Save</button>
@@ -734,7 +738,7 @@
               {qHdr("#7c3aed", "📋", "Admin Note")}
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
                 <label style={labelStyle}>Date<input type="date" value={admForm.date} onChange={e=>setAdmForm(f=>({...f,date:e.target.value}))} style={inputStyle} /></label>
-                <label style={{...labelStyle,flex:"1 1 160px"}}>Type<select value={admForm.type} onChange={e=>setAdmForm(f=>({...f,type:e.target.value}))} style={{...inputStyle,minWidth:0}}>{EVENT_TYPES_ADMIN.map(t=><option key={t}>{t}</option>)}</select></label>
+                <label style={{...labelStyle,flex:"1 1 160px"}}>Type<select value={admForm.type} onChange={e=>setAdmForm(f=>({...f,type:e.target.value}))} style={{...inputStyle,minWidth:0}}>{(adminTypes||DEFAULT_ADMIN_TYPES).map(t=><option key={t}>{t}</option>)}</select></label>
                 <label style={{...labelStyle,flex:"2 1 180px"}}>Notes<input value={admForm.notes} onChange={e=>setAdmForm(f=>({...f,notes:e.target.value}))} style={inputStyle} /></label>
                 <div style={{display:"flex",alignItems:"center"}}>
                   <button onClick={saveAdm} style={btnStyle("#7c3aed")}>Save</button>
@@ -762,7 +766,6 @@
             ))}
           </div>
 
-          {/* Clinical summary */}
           {als.length >= 2 && (() => {
             const story = generateStory(patient);
             return (
@@ -779,64 +782,109 @@
       );
     }
 
-    function ALRefractionTab({ patient, onUpdate, pushUndo, undoStack, setUndoStack }) {
+    // ── Unified Timeline Tab (replaces both Timeline and AL & Refractions) ─────
+    function UnifiedTimelineTab({ patient, onUpdate, pushUndo, undoStack, setUndoStack, clinicalTypes, adminTypes }) {
+      const [cols, setCols] = useState({ al: true, rx: true, clinical: true, admin: true, lens: true });
       const [addingAL, setAddingAL] = useState(false);
       const [addingRx, setAddingRx] = useState(false);
-      const [alForm, setAlForm] = useState({ date: today(), od: "", os: "", notes: "" });
-      const [rxForm, setRxForm] = useState({ date: today(), odSph: "", odCyl: "", odAxis: "", odVA: "20/20", osSph: "", osCyl: "", osAxis: "", osVA: "20/20" });
       const [showStory, setShowStory] = useState(false);
       const [storyData, setStoryData] = useState(null);
+      const [alForm, setAlForm] = useState({ date: today(), od: "", os: "", notes: "" });
+      const [rxForm, setRxForm] = useState({ date: today(), odSph: "", odCyl: "", odAxis: "", odVA: "20/20", osSph: "", osCyl: "", osAxis: "", osVA: "20/20" });
+
       const als = [...(patient.alMeasurements || [])].sort((a, b) => b.date.localeCompare(a.date));
       const alsAsc = [...(patient.alMeasurements || [])].sort((a, b) => a.date.localeCompare(b.date));
       const rxs = [...(patient.refractions || [])].sort((a, b) => b.date.localeCompare(a.date));
-      const allDates = [...new Set([...als.map(m => m.date), ...rxs.map(r => r.date)])].sort((a, b) => b.localeCompare(a));
-      const mergedRows = allDates.map(date => ({ date, al: als.find(m => m.date === date) || null, rx: rxs.find(r => r.date === date) || null }));
+
+      // Build delta map for AL
       const deltaMap = {};
       alsAsc.forEach((m, i) => {
         if (i === 0) { deltaMap[m.id] = { deltaOD: null, deltaOS: null, deltaTime: null }; return; }
         const prev = alsAsc[i - 1];
         deltaMap[m.id] = { deltaOD: m.od - prev.od, deltaOS: m.os - prev.os, deltaTime: durationLabel(parseDate(prev.date), parseDate(m.date)) };
       });
+
+      // Gather all dates
+      const allDates = [...new Set([
+        ...als.map(m => m.date),
+        ...rxs.map(r => r.date),
+        ...(patient.clinicalEvents||[]).map(e => e.date),
+        ...(patient.adminEvents||[]).map(e => e.date),
+        ...(patient.lensHistory||[]).map(l => l.date),
+      ])].sort((a, b) => b.localeCompare(a));
+
+      const COL_DEFS = [
+        { key: "al", label: "📏 AL", color: "#ef4444" },
+        { key: "rx", label: "🔍 Rx", color: "#6d28d9" },
+        { key: "clinical", label: "🩺 Clinical", color: "#0f4c75" },
+        { key: "admin", label: "📋 Admin", color: "#7c3aed" },
+        { key: "lens", label: "👁 Lens", color: "#0369a1" },
+      ];
+
+      const activeCols = COL_DEFS.filter(c => cols[c.key]);
+
       const addAL = () => {
         if (!alForm.date || !alForm.od || !alForm.os) return;
-        onUpdate({ ...patient, alMeasurements: [...(patient.alMeasurements || []), { id: uid(), ...alForm, od: parseFloat(alForm.od), os: parseFloat(alForm.os) }] });
+        onUpdate({ ...patient, alMeasurements: [...(patient.alMeasurements||[]), { id: uid(), ...alForm, od: parseFloat(alForm.od), os: parseFloat(alForm.os) }] });
         setAlForm({ date: today(), od: "", os: "", notes: "" }); setAddingAL(false);
       };
       const addRx = () => {
         if (!rxForm.date || !rxForm.odSph || !rxForm.osSph) return;
-        onUpdate({ ...patient, refractions: [...(patient.refractions || []), { id: uid(), ...rxForm, odSph: parseFloat(rxForm.odSph), odCyl: parseFloat(rxForm.odCyl || 0), odAxis: parseInt(rxForm.odAxis || 0), osSph: parseFloat(rxForm.osSph), osCyl: parseFloat(rxForm.osCyl || 0), osAxis: parseInt(rxForm.osAxis || 0) }] });
+        onUpdate({ ...patient, refractions: [...(patient.refractions||[]), { id: uid(), ...rxForm, odSph: parseFloat(rxForm.odSph), odCyl: parseFloat(rxForm.odCyl||0), odAxis: parseInt(rxForm.odAxis||0), osSph: parseFloat(rxForm.osSph), osCyl: parseFloat(rxForm.osCyl||0), osAxis: parseInt(rxForm.osAxis||0) }] });
         setRxForm({ date: today(), odSph: "", odCyl: "", odAxis: "", odVA: "20/20", osSph: "", osCyl: "", osAxis: "", osVA: "20/20" }); setAddingRx(false);
       };
       const removeAL = (id) => { pushUndo({ type: "restoreAL", patientId: patient.id, item: patient.alMeasurements.find(x => x.id === id) }); onUpdate({ ...patient, alMeasurements: patient.alMeasurements.filter(x => x.id !== id) }); };
       const removeRx = (id) => { pushUndo({ type: "restoreRx", patientId: patient.id, item: patient.refractions.find(x => x.id === id) }); onUpdate({ ...patient, refractions: patient.refractions.filter(x => x.id !== id) }); };
+      const rmClin = (id) => onUpdate({ ...patient, clinicalEvents: patient.clinicalEvents.filter(x => x.id !== id) });
+      const rmAdm  = (id) => onUpdate({ ...patient, adminEvents: patient.adminEvents.filter(x => x.id !== id) });
       const handleUndo = () => {
         if (!undoStack.length) return;
         const last = undoStack[undoStack.length - 1];
-        if (last.type === "restoreAL" && last.patientId === patient.id) onUpdate({ ...patient, alMeasurements: [...(patient.alMeasurements || []), last.item] });
-        else if (last.type === "restoreRx" && last.patientId === patient.id) onUpdate({ ...patient, refractions: [...(patient.refractions || []), last.item] });
+        if (last.type === "restoreAL" && last.patientId === patient.id) onUpdate({ ...patient, alMeasurements: [...(patient.alMeasurements||[]), last.item] });
+        else if (last.type === "restoreRx" && last.patientId === patient.id) onUpdate({ ...patient, refractions: [...(patient.refractions||[]), last.item] });
         setUndoStack(s => s.slice(0, -1));
       };
-      const printAL = () => {
-        const rows = [...allDates].sort((a,b) => a.localeCompare(b)).map(date => {
-          const al = patient.alMeasurements.find(m => m.date === date);
-          const rx = patient.refractions.find(r => r.date === date);
-          return `<tr><td>${fmtDate(date)}</td><td>${al ? al.od : '–'}</td><td>${al ? al.os : '–'}</td><td>${rx ? `${rx.odSph >= 0 ? '+' : ''}${rx.odSph}` : '–'}</td><td>${rx ? `${rx.odCyl >= 0 ? '+' : ''}${rx.odCyl} ×${rx.odAxis}` : '–'}</td><td>${rx ? rx.odVA : '–'}</td><td>${rx ? `${rx.osSph >= 0 ? '+' : ''}${rx.osSph}` : '–'}</td><td>${rx ? `${rx.osCyl >= 0 ? '+' : ''}${rx.osCyl} ×${rx.osAxis}` : '–'}</td><td>${rx ? rx.osVA : '–'}</td><td>${al ? (al.notes || '') : ''}</td></tr>`;
+
+      const printTable = () => {
+        const sortedDates = [...allDates].sort((a,b) => a.localeCompare(b));
+        const rows = sortedDates.map(date => {
+          const al = patient.alMeasurements?.find(m => m.date === date);
+          const rx = patient.refractions?.find(r => r.date === date);
+          return `<tr><td>${fmtDate(date)}</td><td>${al ? al.od : '–'}</td><td>${al ? al.os : '–'}</td><td>${rx ? `${rx.odSph >= 0 ? '+' : ''}${rx.odSph} ${rx.odCyl ? rx.odCyl + ' ×' + rx.odAxis : 'sph'}` : '–'}</td><td>${rx ? `${rx.osSph >= 0 ? '+' : ''}${rx.osSph} ${rx.osCyl ? rx.osCyl + ' ×' + rx.osAxis : 'sph'}` : '–'}</td><td>${al?.notes || ''}</td></tr>`;
         }).join('');
         const w = window.open('', '_blank');
-        w.document.write(`<html><head><title>${displayName(patient.name)} — AL & Refraction Report</title><style>body{font-family:Arial,sans-serif;padding:20px;font-size:12px}table{border-collapse:collapse;width:100%}th{background:#0f4c75;color:#fff;padding:6px 8px;font-size:11px}td{border:1px solid #e2e8f0;padding:5px 8px}</style></head><body><h2>${displayName(patient.name)} — AL & Refraction Summary</h2><table><thead><tr><th>Date</th><th>OD AL</th><th>OS AL</th><th>OD Sph</th><th>OD Cyl/Axis</th><th>OD VA</th><th>OS Sph</th><th>OS Cyl/Axis</th><th>OS VA</th><th>Notes</th></tr></thead><tbody>${rows}</tbody></table><script>window.print();<\/script></body></html>`);
+        w.document.write(`<html><head><title>${displayName(patient.name)} — Timeline</title><style>body{font-family:Arial,sans-serif;padding:20px;font-size:12px}table{border-collapse:collapse;width:100%}th{background:#0f4c75;color:#fff;padding:6px 8px}td{border:1px solid #e2e8f0;padding:5px 8px}</style></head><body><h2>${displayName(patient.name)} — Timeline</h2><table><thead><tr><th>Date</th><th>OD AL</th><th>OS AL</th><th>OD Rx</th><th>OS Rx</th><th>Notes</th></tr></thead><tbody>${rows}</tbody></table><script>window.print();<\/script></body></html>`);
         w.document.close();
       };
+
+      function fmtRxCell(sph, cyl, axis) {
+        const s = `${sph >= 0 ? "+" : ""}${Number(sph).toFixed(2)}`;
+        if (!cyl || cyl === 0) return s + " sph";
+        return `${s} ${cyl >= 0 ? "+" : ""}${Number(cyl).toFixed(2)} ×${axis}°`;
+      }
+
       return (
         <div>
-          <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
-            <button onClick={() => setAddingAL(v => !v)} style={btnStyle("#0f4c75")}>+ AL Measurement</button>
+          {/* Toolbar */}
+          <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
+            <button onClick={() => setAddingAL(v => !v)} style={btnStyle("#0f4c75")}>+ AL</button>
             <button onClick={() => setAddingRx(v => !v)} style={btnStyle("#6d28d9")}>+ Refraction</button>
             <button onClick={() => { setStoryData(generateStory(patient)); setShowStory(true); }} style={btnStyle("#0369a1")}>✨ Generate Story</button>
-            <button onClick={printAL} style={btnStyle("#64748b")}>🖨 Print Table</button>
-            {undoStack.some(u => u.patientId === patient.id) && <button onClick={handleUndo} style={btnStyle("#dc2626")}>↩ Undo Last Remove</button>}
+            <button onClick={printTable} style={btnStyle("#64748b")}>🖨 Print</button>
+            {undoStack.some(u => u.patientId === patient.id) && <button onClick={handleUndo} style={btnStyle("#dc2626")}>↩ Undo</button>}
+            <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+              {COL_DEFS.map(({ key, label, color }) => (
+                <button key={key} onClick={() => setCols(c => ({ ...c, [key]: !c[key] }))}
+                  style={{ background: cols[key] ? color : "#f1f5f9", color: cols[key] ? "#fff" : "#64748b", border: "none", borderRadius: 20, padding: "4px 12px", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
+
+          {/* Add forms */}
           {addingAL && (
-            <div style={{ ...formCard, marginBottom: 14 }}>
+            <div style={{ ...formCard, marginBottom: 12 }}>
               <div style={{ width: "100%", fontWeight: 600, fontSize: 13, marginBottom: 4 }}>New AL Measurement</div>
               {[["date","Date","date"],["od","OD (mm)","number"],["os","OS (mm)","number"]].map(([k,l,t]) => (
                 <label key={k} style={labelStyle}>{l}<input type={t} step={t==="number"?"0.01":undefined} value={alForm[k]} onChange={e => setAlForm(f => ({ ...f, [k]: e.target.value }))} style={inputStyle} /></label>
@@ -847,41 +895,140 @@
             </div>
           )}
           {addingRx && (
-            <div style={{ ...formCard, marginBottom: 14 }}>
+            <div style={{ ...formCard, marginBottom: 12 }}>
               <div style={{ width: "100%", fontWeight: 600, fontSize: 13, marginBottom: 4 }}>New Refraction</div>
               <label style={labelStyle}>Date<input type="date" value={rxForm.date} onChange={e => setRxForm(f => ({ ...f, date: e.target.value }))} style={inputStyle} /></label>
-              {[["odSph","OD Sph"],["odCyl","OD Cyl"],["odAxis","OD Axis"],["odVA","OD VA"],["osSph","OS Sph"],["osCyl","OS Cyl"],["osAxis","OS Axis"],["osVA","OS VA"]].map(([k,l]) => (
-                <label key={k} style={labelStyle}>{l}<input value={rxForm[k]} onChange={e => setRxForm(f => ({ ...f, [k]: e.target.value }))} style={inputStyle} /></label>
+              {[["odSph","OD Sph"],["odCyl","OD Cyl"],["odAxis","OD Axis"],["osSph","OS Sph"],["osCyl","OS Cyl"],["osAxis","OS Axis"]].map(([k,l]) => (
+                <label key={k} style={{ ...labelStyle, flex: "0 0 80px" }}>{l}<input value={rxForm[k]} onChange={e => setRxForm(f => ({ ...f, [k]: e.target.value }))} style={inputStyle} /></label>
               ))}
               <button onClick={addRx} style={btnStyle("#6d28d9")}>Save</button>
               <button onClick={() => setAddingRx(false)} style={btnStyle("#94a3b8")}>Cancel</button>
             </div>
           )}
+
+          {/* Unified table */}
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
               <thead>
-                <tr style={{ background: "#f1f5f9" }}>
-                  <th style={th}>Date</th><th style={th}>OD AL (mm)</th><th style={th}>OS AL (mm)</th>
-                  <th style={th}>OD Refraction</th><th style={th}>OD VA</th><th style={th}>OS Refraction</th>
-                  <th style={th}>OS VA</th><th style={th}>Notes</th><th style={th}></th>
+                <tr style={{ background: "#0f4c75" }}>
+                  <th style={{ ...th, background: "#0f4c75", color: "#fff", width: 90 }}>Date</th>
+                  {cols.al && <>
+                    <th style={{ ...th, background: "#fef2f2", color: "#ef4444" }}>OD AL</th>
+                    <th style={{ ...th, background: "#eff6ff", color: "#3b82f6" }}>OS AL</th>
+                  </>}
+                  {cols.rx && <>
+                    <th style={{ ...th, background: "#f5f3ff", color: "#6d28d9" }}>OD Rx</th>
+                    <th style={{ ...th, background: "#f5f3ff", color: "#6d28d9" }}>OS Rx</th>
+                  </>}
+                  {cols.clinical && <th style={{ ...th, background: "#f0f9ff", color: "#0f4c75" }}>🩺 Clinical</th>}
+                  {cols.admin    && <th style={{ ...th, background: "#faf5ff", color: "#7c3aed" }}>📋 Admin</th>}
+                  {cols.lens     && <th style={{ ...th, background: "#f0f9ff", color: "#0369a1" }}>👁 Lens</th>}
+                  <th style={{ ...th, background: "#f1f5f9", width: 60 }}></th>
                 </tr>
               </thead>
               <tbody>
-                {mergedRows.map((row, i) => {
-                  const alEntry = row.al ? deltaMap[row.al.id] : null;
+                {allDates.map((date, rowIdx) => {
+                  const alEntry = als.find(m => m.date === date);
+                  const rxEntry = rxs.find(r => r.date === date);
+                  const clinEntries = (patient.clinicalEvents||[]).filter(e => e.date === date);
+                  const admEntries  = (patient.adminEvents||[]).filter(e => e.date === date);
+                  const lensEntries = (patient.lensHistory||[]).filter(l => l.date === date);
+                  if (!activeCols.some(c => {
+                    if (c.key === "al") return !!alEntry;
+                    if (c.key === "rx") return !!rxEntry;
+                    if (c.key === "clinical") return clinEntries.length > 0;
+                    if (c.key === "admin") return admEntries.length > 0;
+                    if (c.key === "lens") return lensEntries.length > 0;
+                    return false;
+                  })) return null;
+
+                  const alDelta = alEntry ? deltaMap[alEntry.id] : null;
+
                   return (
-                    <tr key={row.date} style={{ background: i % 2 === 0 ? "#fff" : "#f8fafc" }}>
-                      <td style={td}><div style={{ fontWeight: 600 }}>{fmtDate(row.date)}</div>{alEntry && alEntry.deltaTime && <div style={{ fontSize: 10, color: "#94a3b8" }}>↑ {alEntry.deltaTime}</div>}</td>
-                      <td style={td}>{row.al ? <><span style={{ color: "#ef4444" }}>{row.al.od}</span>{alEntry && alEntry.deltaOD !== null && <span style={{ fontSize: 10, color: "#94a3b8", marginLeft: 4 }}>({sgnFmt(alEntry.deltaOD)})</span>}</> : <span style={{ color: "#cbd5e1" }}>–</span>}</td>
-                      <td style={td}>{row.al ? <><span style={{ color: "#3b82f6" }}>{row.al.os}</span>{alEntry && alEntry.deltaOS !== null && <span style={{ fontSize: 10, color: "#94a3b8", marginLeft: 4 }}>({sgnFmt(alEntry.deltaOS)})</span>}</> : <span style={{ color: "#cbd5e1" }}>–</span>}</td>
-                      <td style={td}>{row.rx ? fmtRx(row.rx.odSph, row.rx.odCyl, row.rx.odAxis) : <span style={{ color: "#cbd5e1" }}>–</span>}</td>
-                      <td style={td}>{row.rx ? <span style={{ fontSize: 11 }}>{row.rx.odVA}</span> : <span style={{ color: "#cbd5e1" }}>–</span>}</td>
-                      <td style={td}>{row.rx ? fmtRx(row.rx.osSph, row.rx.osCyl, row.rx.osAxis) : <span style={{ color: "#cbd5e1" }}>–</span>}</td>
-                      <td style={td}>{row.rx ? <span style={{ fontSize: 11 }}>{row.rx.osVA}</span> : <span style={{ color: "#cbd5e1" }}>–</span>}</td>
-                      <td style={td}><span style={{ fontSize: 11, color: "#64748b" }}>{row.al?.notes || ""}</span></td>
-                      <td style={{ ...td, whiteSpace: "nowrap" }}>
-                        {row.al && <button onClick={() => removeAL(row.al.id)} style={{ background: "#fce7f3", border: "none", borderRadius: 4, padding: "2px 6px", cursor: "pointer", color: "#db2777", fontSize: 10, marginRight: 2 }}>AL ✕</button>}
-                        {row.rx && <button onClick={() => removeRx(row.rx.id)} style={{ background: "#ede9fe", border: "none", borderRadius: 4, padding: "2px 6px", cursor: "pointer", color: "#7c3aed", fontSize: 10 }}>Rx ✕</button>}
+                    <tr key={date} style={{ background: rowIdx % 2 === 0 ? "#fff" : "#f8fafc" }}>
+                      <td style={{ ...td, verticalAlign: "top", paddingTop: 10 }}>
+                        <div style={{ fontWeight: 600, fontSize: 12 }}>{fmtDate(date)}</div>
+                        {patient.therapyStartDate && (() => {
+                          const startDt = parseDate(patient.therapyStartDate), rowDt = parseDate(date);
+                          if (rowDt <= startDt) return null;
+                          return <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 2 }}>{durationLabel(startDt, rowDt)}</div>;
+                        })()}
+                        {alDelta?.deltaTime && <div style={{ fontSize: 10, color: "#bae6fd", marginTop: 1 }}>↑ {alDelta.deltaTime}</div>}
+                      </td>
+                      {cols.al && <>
+                        <td style={{ ...td, verticalAlign: "top" }}>
+                          {alEntry ? (
+                            <div>
+                              <span style={{ color: "#ef4444", fontWeight: 600 }}>{alEntry.od}</span>
+                              {alDelta?.deltaOD !== null && <span style={{ fontSize: 10, color: "#94a3b8", marginLeft: 4 }}>({sgnFmt(alDelta.deltaOD)})</span>}
+                              {alEntry.notes && <div style={{ fontSize: 10, color: "#64748b", marginTop: 2 }}>{alEntry.notes}</div>}
+                            </div>
+                          ) : <span style={{ color: "#e2e8f0" }}>·</span>}
+                        </td>
+                        <td style={{ ...td, verticalAlign: "top" }}>
+                          {alEntry ? (
+                            <div>
+                              <span style={{ color: "#3b82f6", fontWeight: 600 }}>{alEntry.os}</span>
+                              {alDelta?.deltaOS !== null && <span style={{ fontSize: 10, color: "#94a3b8", marginLeft: 4 }}>({sgnFmt(alDelta.deltaOS)})</span>}
+                            </div>
+                          ) : <span style={{ color: "#e2e8f0" }}>·</span>}
+                        </td>
+                      </>}
+                      {cols.rx && <>
+                        <td style={{ ...td, verticalAlign: "top", fontSize: 11 }}>
+                          {rxEntry ? fmtRxCell(rxEntry.odSph, rxEntry.odCyl, rxEntry.odAxis) : <span style={{ color: "#e2e8f0" }}>·</span>}
+                        </td>
+                        <td style={{ ...td, verticalAlign: "top", fontSize: 11 }}>
+                          {rxEntry ? fmtRxCell(rxEntry.osSph, rxEntry.osCyl, rxEntry.osAxis) : <span style={{ color: "#e2e8f0" }}>·</span>}
+                        </td>
+                      </>}
+                      {cols.clinical && (
+                        <td style={{ ...td, verticalAlign: "top" }}>
+                          {clinEntries.length === 0 ? <span style={{ color: "#e2e8f0" }}>·</span> : (
+                            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                              {clinEntries.map(e => (
+                                <div key={e.id} style={{ borderLeft: "3px solid #0f4c75", paddingLeft: 6 }}>
+                                  <div style={{ fontWeight: 600, color: "#0f4c75", fontSize: 11 }}>{e.type}</div>
+                                  {e.notes && <div style={{ fontSize: 11, color: "#64748b" }}>{e.notes}</div>}
+                                  <button onClick={() => rmClin(e.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#cbd5e1", fontSize: 10, padding: 0 }}>✕</button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </td>
+                      )}
+                      {cols.admin && (
+                        <td style={{ ...td, verticalAlign: "top" }}>
+                          {admEntries.length === 0 ? <span style={{ color: "#e2e8f0" }}>·</span> : (
+                            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                              {admEntries.map(e => (
+                                <div key={e.id} style={{ borderLeft: "3px solid #7c3aed", paddingLeft: 6 }}>
+                                  <div style={{ fontWeight: 600, color: "#7c3aed", fontSize: 11 }}>{e.type}</div>
+                                  {e.notes && <div style={{ fontSize: 11, color: "#64748b" }}>{e.notes}</div>}
+                                  <button onClick={() => rmAdm(e.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#cbd5e1", fontSize: 10, padding: 0 }}>✕</button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </td>
+                      )}
+                      {cols.lens && (
+                        <td style={{ ...td, verticalAlign: "top" }}>
+                          {lensEntries.length === 0 ? <span style={{ color: "#e2e8f0" }}>·</span> : (
+                            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                              {lensEntries.map(l => (
+                                <div key={l.id} style={{ borderLeft: "3px solid #0369a1", paddingLeft: 6 }}>
+                                  <div style={{ fontWeight: 600, color: "#0369a1", fontSize: 11 }}>{l.type}</div>
+                                  {l.reason && <div style={{ fontSize: 11, color: "#64748b" }}>{l.reason}</div>}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </td>
+                      )}
+                      <td style={{ ...td, verticalAlign: "top", whiteSpace: "nowrap" }}>
+                        {alEntry && <button onClick={() => removeAL(alEntry.id)} style={{ background: "#fce7f3", border: "none", borderRadius: 4, padding: "2px 6px", cursor: "pointer", color: "#db2777", fontSize: 10, display: "block", marginBottom: 2 }}>AL ✕</button>}
+                        {rxEntry && <button onClick={() => removeRx(rxEntry.id)} style={{ background: "#ede9fe", border: "none", borderRadius: 4, padding: "2px 6px", cursor: "pointer", color: "#7c3aed", fontSize: 10, display: "block" }}>Rx ✕</button>}
                       </td>
                     </tr>
                   );
@@ -894,13 +1041,95 @@
       );
     }
 
+    // ── BV Tab ────────────────────────────────────────────────────────────────
+    function BVTab({ patient, onUpdate, bvTests }) {
+      const tests = bvTests || DEFAULT_BV_TESTS;
+      const [adding, setAdding] = useState(false);
+      const [form, setForm] = useState({ date: today(), results: {}, notes: "" });
+
+      const entries = [...(patient.bvEntries||[])].sort((a,b) => b.date.localeCompare(a.date));
+
+      const save = () => {
+        if (!form.date) return;
+        onUpdate({ ...patient, bvEntries: [...(patient.bvEntries||[]), { id: uid(), date: form.date, results: form.results, notes: form.notes }] });
+        setForm({ date: today(), results: {}, notes: "" });
+        setAdding(false);
+      };
+      const remove = (id) => onUpdate({ ...patient, bvEntries: (patient.bvEntries||[]).filter(x => x.id !== id) });
+
+      return (
+        <div>
+          <div style={{ display: "flex", gap: 10, marginBottom: 16, alignItems: "center" }}>
+            <button onClick={() => setAdding(v => !v)} style={btnStyle("#0369a1")}>+ BV Entry</button>
+            <span style={{ fontSize: 12, color: "#64748b" }}>Tests configured in Settings</span>
+          </div>
+
+          {adding && (
+            <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: "16px", marginBottom: 16 }}>
+              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 12 }}>New BV Assessment</div>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+                <label style={labelStyle}>Date<input type="date" value={form.date} onChange={e => setForm(f => ({...f,date:e.target.value}))} style={inputStyle} /></label>
+                <label style={{...labelStyle,flex:"2 1 200px"}}>Notes<input value={form.notes} onChange={e => setForm(f => ({...f,notes:e.target.value}))} placeholder="Overall impressions…" style={inputStyle} /></label>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px,1fr))", gap: 8, marginBottom: 12 }}>
+                {tests.map(test => (
+                  <label key={test} style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 11, color: "#64748b" }}>
+                    {test}
+                    <input value={form.results[test]||""} onChange={e => setForm(f => ({...f,results:{...f.results,[test]:e.target.value}}))} placeholder="Result…" style={{ ...inputStyle, fontSize: 12 }} />
+                  </label>
+                ))}
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={save} style={btnStyle("#0369a1")}>Save</button>
+                <button onClick={() => setAdding(false)} style={btnStyle("#94a3b8")}>Cancel</button>
+              </div>
+            </div>
+          )}
+
+          {entries.length === 0 && !adding && <div style={{ color: "#94a3b8", fontSize: 13, padding: "20px 0" }}>No BV assessments recorded.</div>}
+
+          {/* BV table — rows are entries, columns are tests */}
+          {entries.length > 0 && (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <thead>
+                  <tr style={{ background: "#f1f5f9" }}>
+                    <th style={th}>Date</th>
+                    {tests.map(t => <th key={t} style={{ ...th, fontSize: 10, whiteSpace: "nowrap" }}>{t}</th>)}
+                    <th style={th}>Notes</th>
+                    <th style={th}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {entries.map((entry, i) => (
+                    <tr key={entry.id} style={{ background: i % 2 === 0 ? "#fff" : "#f8fafc" }}>
+                      <td style={{ ...td, fontWeight: 600, whiteSpace: "nowrap" }}>{fmtDate(entry.date)}</td>
+                      {tests.map(t => (
+                        <td key={t} style={{ ...td, textAlign: "center", color: entry.results[t] ? "#1e293b" : "#cbd5e1" }}>
+                          {entry.results[t] || "–"}
+                        </td>
+                      ))}
+                      <td style={{ ...td, fontSize: 11, color: "#64748b", maxWidth: 160 }}>{entry.notes||""}</td>
+                      <td style={td}>
+                        <button onClick={() => remove(entry.id)} style={{ background: "#fce7f3", border: "none", borderRadius: 4, padding: "2px 8px", cursor: "pointer", color: "#db2777", fontSize: 11 }}>Remove</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      );
+    }
+
     function ALGraphTab({ patient }) {
       return (
         <div>
           <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 8, color: "#0f4c75" }}>Axial Length Over Time</div>
           <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 12, display: "flex", gap: 16, flexWrap: "wrap" }}>
-            <span>🟡 Yellow = clinical events</span><span>🟣 Purple = Rx visits</span><span>🟢 Green = therapy start</span>
-            <span style={{ fontStyle: "italic" }}>Hover over dots for values</span>
+            <span>🟡 Yellow = Treatment Change events</span><span>🟣 Purple = Rx visits</span><span>🟢 Green = therapy start</span>
+            <span style={{ fontStyle: "italic" }}>Hover dots for values</span>
           </div>
           <ALGraph patient={patient} />
         </div>
@@ -913,11 +1142,11 @@
       const [form, setForm] = useState({ date: today(), type: patient.therapy || "Ortho-K", odBC: "", odPower: "", odDiam: "", odRZD1: "", odRZD2: "", odLZA1: "", odLZA2: "", odColor: "Green", osBC: "", osPower: "", osDiam: "", osRZD1: "", osRZD2: "", osLZA1: "", osLZA2: "", osColor: "Blue", reason: "" });
       const save = () => {
         if (!form.date) return;
-        onUpdate({ ...patient, lensHistory: [...(patient.lensHistory || []), { id: uid(), ...form, odBC: parseFloat(form.odBC)||0, odPower: parseFloat(form.odPower)||0, odDiam: parseFloat(form.odDiam)||0, osBC: parseFloat(form.osBC)||0, osPower: parseFloat(form.osPower)||0, osDiam: parseFloat(form.osDiam)||0 }] });
+        onUpdate({ ...patient, lensHistory: [...(patient.lensHistory||[]), { id: uid(), ...form, odBC: parseFloat(form.odBC)||0, odPower: parseFloat(form.odPower)||0, odDiam: parseFloat(form.odDiam)||0, osBC: parseFloat(form.osBC)||0, osPower: parseFloat(form.osPower)||0, osDiam: parseFloat(form.osDiam)||0 }] });
         setAdding(false);
       };
       const remove = (id) => onUpdate({ ...patient, lensHistory: patient.lensHistory.filter(x => x.id !== id) });
-      const lenses = [...(patient.lensHistory || [])].sort((a, b) => b.date.localeCompare(a.date));
+      const lenses = [...(patient.lensHistory||[])].sort((a,b) => b.date.localeCompare(a.date));
       const showOrthoKFields = isOrthoK || form.type === "Ortho-K";
       return (
         <div>
@@ -953,7 +1182,7 @@
           <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 12 }}>
             {lenses.map(l => (
               <div key={l.id} style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: "14px 16px", background: "#f8fafc" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
                   <div><span style={{ fontWeight: 700, fontSize: 14 }}>{l.type}</span><span style={{ marginLeft: 10, fontSize: 12, color: "#64748b" }}>{fmtDate(l.date)}</span>{l.reason && <span style={{ marginLeft: 8, fontSize: 11, color: "#94a3b8", fontStyle: "italic" }}>— {l.reason}</span>}</div>
                   <button onClick={() => remove(l.id)} style={{ background: "#fce7f3", border: "none", borderRadius: 5, padding: "3px 8px", cursor: "pointer", color: "#db2777", fontSize: 11 }}>Remove</button>
                 </div>
@@ -979,136 +1208,6 @@
       );
     }
 
-    function EventsTab({ patient, onUpdate }) {
-      const [clinForm, setClinForm] = useState({ date: today(), type: EVENT_TYPES_CLINICAL[0], notes: "" });
-      const [admForm,  setAdmForm]  = useState({ date: today(), type: EVENT_TYPES_ADMIN[0], notes: "" });
-      const addClin = () => { if (!clinForm.date) return; onUpdate({ ...patient, clinicalEvents: [...(patient.clinicalEvents||[]), { id: uid(), ...clinForm }] }); setClinForm({ date: today(), type: EVENT_TYPES_CLINICAL[0], notes: "" }); };
-      const addAdm  = () => { if (!admForm.date) return; onUpdate({ ...patient, adminEvents: [...(patient.adminEvents||[]), { id: uid(), ...admForm }] }); setAdmForm({ date: today(), type: EVENT_TYPES_ADMIN[0], notes: "" }); };
-      const rmClin = (id) => onUpdate({ ...patient, clinicalEvents: patient.clinicalEvents.filter(x => x.id !== id) });
-      const rmAdm  = (id) => onUpdate({ ...patient, adminEvents: patient.adminEvents.filter(x => x.id !== id) });
-      const clin = [...(patient.clinicalEvents||[])].sort((a,b) => b.date.localeCompare(a.date));
-      const adm  = [...(patient.adminEvents||[])].sort((a,b) => b.date.localeCompare(a.date));
-      return (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
-          <div>
-            <div style={{ fontWeight: 700, color: "#0f4c75", marginBottom: 10, fontSize: 13 }}>🩺 Clinical Events</div>
-            <div style={{ ...formCard, marginBottom: 12, flexDirection: "column" }}>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <label style={labelStyle}>Date<input type="date" value={clinForm.date} onChange={e => setClinForm(f => ({ ...f, date: e.target.value }))} style={inputStyle} /></label>
-                <label style={labelStyle}>Type<select value={clinForm.type} onChange={e => setClinForm(f => ({ ...f, type: e.target.value }))} style={{ ...inputStyle, minWidth: 140 }}>{EVENT_TYPES_CLINICAL.map(t => <option key={t}>{t}</option>)}</select></label>
-                <label style={{ ...labelStyle, flex: "1 1 180px" }}>Notes<input value={clinForm.notes} onChange={e => setClinForm(f => ({ ...f, notes: e.target.value }))} style={inputStyle} /></label>
-              </div>
-              <button onClick={addClin} style={{ ...btnStyle("#0f4c75"), marginTop: 8, alignSelf: "flex-start" }}>Add</button>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>{clin.map(e => <EventCard key={e.id} ev={e} color="#0f4c75" onRemove={() => rmClin(e.id)} />)}</div>
-          </div>
-          <div>
-            <div style={{ fontWeight: 700, color: "#7c3aed", marginBottom: 10, fontSize: 13 }}>📋 Admin Events</div>
-            <div style={{ ...formCard, marginBottom: 12, flexDirection: "column" }}>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <label style={labelStyle}>Date<input type="date" value={admForm.date} onChange={e => setAdmForm(f => ({ ...f, date: e.target.value }))} style={inputStyle} /></label>
-                <label style={labelStyle}>Type<select value={admForm.type} onChange={e => setAdmForm(f => ({ ...f, type: e.target.value }))} style={{ ...inputStyle, minWidth: 140 }}>{EVENT_TYPES_ADMIN.map(t => <option key={t}>{t}</option>)}</select></label>
-                <label style={{ ...labelStyle, flex: "1 1 180px" }}>Notes<input value={admForm.notes} onChange={e => setAdmForm(f => ({ ...f, notes: e.target.value }))} style={inputStyle} /></label>
-              </div>
-              <button onClick={addAdm} style={{ ...btnStyle("#7c3aed"), marginTop: 8, alignSelf: "flex-start" }}>Add</button>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>{adm.map(e => <EventCard key={e.id} ev={e} color="#7c3aed" onRemove={() => rmAdm(e.id)} />)}</div>
-          </div>
-        </div>
-      );
-    }
-
-    function TimelineTab({ patient }) {
-      const [cols, setCols] = useState({ al: true, rx: true, clinical: true, admin: true, lens: true });
-      const COL_DEFS = [
-        { key: "al", label: "📏 AL", color: "#ef4444", bg: "#fff5f5" },
-        { key: "rx", label: "🔍 Rx", color: "#6d28d9", bg: "#f5f3ff" },
-        { key: "clinical", label: "🩺 Clinical", color: "#0f4c75", bg: "#f0f9ff" },
-        { key: "admin", label: "📋 Admin", color: "#7c3aed", bg: "#faf5ff" },
-        { key: "lens", label: "👁 Lens", color: "#0369a1", bg: "#f0f9ff" },
-      ];
-      const byDate = {};
-      const addEntry = (date, kind, content) => {
-        if (!byDate[date]) byDate[date] = { al: [], rx: [], clinical: [], admin: [], lens: [] };
-        byDate[date][kind].push(content);
-      };
-      (patient.alMeasurements||[]).forEach(m => addEntry(m.date, "al", { alOD: m.od, alOS: m.os, notes: m.notes || "" }));
-      (patient.refractions||[]).forEach(r => {
-        const fe = (sph, cyl, axis) => `${sph >= 0 ? "+" : ""}${Number(sph).toFixed(2)} ${cyl !== 0 ? `${cyl >= 0 ? "+" : ""}${Number(cyl).toFixed(2)} ×${axis}°` : "sph"}`;
-        addEntry(r.date, "rx", { rxLine: true, rxOD: `OD ${fe(r.odSph, r.odCyl, r.odAxis)}`, rxOS: `OS ${fe(r.osSph, r.osCyl, r.osAxis)}` });
-      });
-      (patient.clinicalEvents||[]).forEach(e => addEntry(e.date, "clinical", { text: e.type, sub: e.notes || "" }));
-      (patient.adminEvents||[]).forEach(e => addEntry(e.date, "admin", { text: e.type, sub: e.notes || "" }));
-      (patient.lensHistory||[]).forEach(l => addEntry(l.date, "lens", { text: l.type, sub: l.reason || "" }));
-      const activeCols = COL_DEFS.filter(c => cols[c.key]);
-      const allDates = Object.keys(byDate).sort((a, b) => b.localeCompare(a));
-      const visibleDates = allDates.filter(date => activeCols.some(c => byDate[date][c.key]?.length > 0));
-      return (
-        <div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
-            {COL_DEFS.map(({ key, label, color }) => (
-              <button key={key} onClick={() => setCols(c => ({ ...c, [key]: !c[key] }))}
-                style={{ background: cols[key] ? color : "#f1f5f9", color: cols[key] ? "#fff" : "#64748b", border: "none", borderRadius: 20, padding: "5px 14px", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
-                {label}
-              </button>
-            ))}
-          </div>
-          {visibleDates.length === 0 && <div style={{ color: "#94a3b8", fontSize: 13 }}>No events for selected columns.</div>}
-          {visibleDates.length > 0 && (
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-                <thead>
-                  <tr>
-                    <th style={{ ...th, width: 90, background: "#0f4c75", color: "#fff" }}>Date</th>
-                    {activeCols.map(c => <th key={c.key} style={{ ...th, background: c.bg, color: c.color, borderBottom: `2px solid ${c.color}` }}>{c.label}</th>)}
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleDates.map((date, rowIdx) => {
-                    const row = byDate[date];
-                    return (
-                      <tr key={date} style={{ background: rowIdx % 2 === 0 ? "#fff" : "#f8fafc" }}>
-                        <td style={{ ...td, fontWeight: 600, fontSize: 11, color: "#475569", whiteSpace: "nowrap", verticalAlign: "top", paddingTop: 10 }}>
-                          {fmtDate(date)}
-                          {patient.therapyStartDate && (() => {
-                            const startDt = parseDate(patient.therapyStartDate), rowDt = parseDate(date);
-                            if (rowDt <= startDt) return null;
-                            return <div style={{ fontSize: 10, color: "#94a3b8", fontWeight: 400, marginTop: 2 }}>{durationLabel(startDt, rowDt)}</div>;
-                          })()}
-                        </td>
-                        {activeCols.map(c => {
-                          const entries = row[c.key] || [];
-                          return (
-                            <td key={c.key} style={{ ...td, verticalAlign: "top", background: entries.length > 0 ? c.bg + "88" : "transparent" }}>
-                              {entries.length === 0 ? <span style={{ color: "#e2e8f0", fontSize: 16 }}>·</span> : (
-                                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                                  {entries.map((entry, ei) => (
-                                    <div key={ei} style={{ borderLeft: `3px solid ${c.color}`, paddingLeft: 7 }}>
-                                      {entry.rxLine ? (
-                                        <div style={{ fontSize: 11, color: "#64748b" }}><div style={{ whiteSpace: "nowrap" }}>{entry.rxOD}</div><div style={{ whiteSpace: "nowrap" }}>{entry.rxOS}</div></div>
-                                      ) : entry.alOD !== undefined ? (
-                                        <div style={{ fontSize: 11, color: "#64748b" }}><div style={{ whiteSpace: "nowrap" }}>OD {entry.alOD}</div><div style={{ whiteSpace: "nowrap" }}>OS {entry.alOS}</div>{entry.notes && <div style={{ marginTop: 1 }}>{entry.notes}</div>}</div>
-                                      ) : (
-                                        <div><div style={{ fontWeight: 600, color: c.color, fontSize: 12 }}>{entry.text}</div>{entry.sub && <div style={{ fontSize: 11, color: "#64748b", marginTop: 1 }}>{entry.sub}</div>}</div>
-                                      )}
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      );
-    }
-
     function ExportTab({ patient }) {
       const generate = () => {
         const als = [...(patient.alMeasurements||[])].sort((a,b) => a.date.localeCompare(b.date));
@@ -1117,20 +1216,19 @@
           `THE SPARK OPTOMETRY — MYOPIA MANAGEMENT REPORT`, `${"=".repeat(52)}`,
           `Patient: ${displayName(patient.name)}`, `DOB: ${fmtDate(patient.dob)}`,
           `Location: ${patient.location}`,
-          `Therapy: ${patient.therapy}${patient.combinationTherapy ? " + " + patient.combinationTherapy + " (combination)" : ""}`,
+          `Therapy: ${patient.therapy}${patient.combinationTherapy ? " + " + patient.combinationTherapy : ""}`,
           `Status: ${patient.status}`, `Initiating Doctor: ${patient.initiatingDoctor}`,
-          `Managing Doctor: ${patient.managingDoctor || patient.initiatingDoctor}`, ``,
+          `Managing Doctor: ${patient.managingDoctor || patient.initiatingDoctor}`,
+          patient.parent1Myopia ? `Parent 1 Myopia: ${patient.parent1Myopia}` : "",
+          patient.parent2Myopia ? `Parent 2 Myopia: ${patient.parent2Myopia}` : "",
+          ``,
           `AXIAL LENGTH MEASUREMENTS`, `${"─".repeat(40)}`,
           ...als.map(m => `${fmtDate(m.date)}  OD: ${m.od} mm  OS: ${m.os} mm${m.notes ? "  — " + m.notes : ""}`), ``,
           `REFRACTIONS`, `${"─".repeat(40)}`,
-          ...rxs.map(r => `${fmtDate(r.date)}  OD: ${r.odSph>=0?"+":""}${r.odSph} ${r.odCyl} x${r.odAxis} ${r.odVA}  OS: ${r.osSph>=0?"+":""}${r.osSph} ${r.osCyl} x${r.osAxis} ${r.osVA}`), ``,
-          `LENS HISTORY`, `${"─".repeat(40)}`,
-          ...(patient.lensHistory||[]).sort((a,b) => b.date.localeCompare(a.date)).map(l => `${fmtDate(l.date)}  ${l.type}  OD: BC ${l.odBC} / ${l.odPower} / D${l.odDiam}  OS: BC ${l.osBC} / ${l.osPower} / D${l.osDiam}  ${l.reason}`), ``,
+          ...rxs.map(r => `${fmtDate(r.date)}  OD: ${r.odSph>=0?"+":""}${r.odSph} ${r.odCyl} x${r.odAxis}  OS: ${r.osSph>=0?"+":""}${r.osSph} ${r.osCyl} x${r.osAxis}`), ``,
           `CLINICAL EVENTS`, `${"─".repeat(40)}`,
-          ...(patient.clinicalEvents||[]).sort((a,b) => b.date.localeCompare(a.date)).map(e => `${fmtDate(e.date)}  ${e.type}${e.notes?" — "+e.notes:""}`), ``,
-          `ADMIN EVENTS`, `${"─".repeat(40)}`,
-          ...(patient.adminEvents||[]).sort((a,b) => b.date.localeCompare(a.date)).map(e => `${fmtDate(e.date)}  ${e.type}${e.notes?" — "+e.notes:""}`),
-        ];
+          ...(patient.clinicalEvents||[]).sort((a,b) => b.date.localeCompare(a.date)).map(e => `${fmtDate(e.date)}  ${e.type}${e.notes?" — "+e.notes:""}`),
+        ].filter(l => l !== "");
         const blob = new Blob([lines.join("\n")], { type: "text/plain" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
@@ -1139,19 +1237,25 @@
       };
       return (
         <div>
-          <div style={{ fontSize: 13, color: "#64748b", marginBottom: 16 }}>Export a plain-text clinical summary for this patient (internal notes excluded).</div>
+          <div style={{ fontSize: 13, color: "#64748b", marginBottom: 16 }}>Export a plain-text clinical summary (staff alert and notes excluded).</div>
           <button onClick={generate} style={btnStyle("#0f4c75")}>⬇ Download Report (.txt)</button>
         </div>
       );
     }
 
+    // ── Patient Header / Details Edit ─────────────────────────────────────────
     function PatientHeaderEdit({ patient, onUpdate, doctors, locations }) {
       const [editing, setEditing] = useState(false);
       const [form, setForm] = useState({
         therapy: patient.therapy, combinationTherapy: patient.combinationTherapy || "",
         status: patient.status, initiatingDoctor: patient.initiatingDoctor,
         managingDoctor: patient.managingDoctor || patient.initiatingDoctor,
-        location: patient.location, internalNotes: patient.internalNotes || "",
+        location: patient.location,
+        staffAlert: patient.staffAlert || "",
+        notes: patient.notes || "",
+        parent1Myopia: patient.parent1Myopia || "",
+        parent2Myopia: patient.parent2Myopia || "",
+        bvRisk: patient.bvRisk || "Not assessed",
         warrantyOrderDate: patient.warrantyOrderDate || "",
         therapyStartDate: patient.therapyStartDate || "",
         atropineConc: patient.atropineConc || "", atropineConcOther: patient.atropineConcOther || "",
@@ -1159,59 +1263,105 @@
       if (!editing) return <button onClick={() => setEditing(true)} style={{ marginTop: 10, background: "none", border: "1px solid #e2e8f0", borderRadius: 6, padding: "4px 12px", cursor: "pointer", fontSize: 11, color: "#64748b" }}>Edit Details</button>;
       const save = () => { onUpdate({ ...patient, ...form }); setEditing(false); };
       return (
-        <div style={{ marginTop: 12, display: "flex", flexWrap: "wrap", gap: 10, alignItems: "flex-end", background: "#f8fafc", borderRadius: 8, padding: 12 }}>
-          {[["therapy","Primary Therapy",THERAPIES],["status","Status",STATUSES],["location","Location",locations||LOCATIONS],["initiatingDoctor","Initiating Dr.",doctors||DOCTORS],["managingDoctor","Managing Dr.",doctors||DOCTORS]].map(([k,label,opts]) => (
-            <label key={k} style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 11, color: "#64748b", minWidth: 130 }}>
-              {label}
-              <select value={form[k]} onChange={e => setForm(f => ({ ...f, [k]: e.target.value }))} style={{ padding: "5px 8px", border: "1px solid #e2e8f0", borderRadius: 5, fontSize: 12 }}>
-                {opts.map(o => <option key={o}>{o}</option>)}
+        <div style={{ marginTop: 12, background: "#f8fafc", borderRadius: 8, padding: 14 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "flex-end", marginBottom: 12 }}>
+            {[["therapy","Primary Therapy",THERAPIES],["status","Status",STATUSES],["location","Location",locations||LOCATIONS],["initiatingDoctor","Initiating Dr.",doctors||DOCTORS],["managingDoctor","Managing Dr.",doctors||DOCTORS]].map(([k,label,opts]) => (
+              <label key={k} style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 11, color: "#64748b", minWidth: 130 }}>
+                {label}
+                <select value={form[k]} onChange={e => setForm(f => ({ ...f, [k]: e.target.value }))} style={{ padding: "5px 8px", border: "1px solid #e2e8f0", borderRadius: 5, fontSize: 12 }}>
+                  {opts.map(o => <option key={o}>{o}</option>)}
+                </select>
+              </label>
+            ))}
+            <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 11, color: "#64748b", minWidth: 150 }}>
+              Combination Therapy
+              <select value={form.combinationTherapy} onChange={e => setForm(f => ({ ...f, combinationTherapy: e.target.value }))} style={{ padding: "5px 8px", border: "1px solid #e2e8f0", borderRadius: 5, fontSize: 12 }}>
+                <option value="">None</option>
+                {THERAPIES.filter(t => t !== form.therapy).map(o => <option key={o}>{o}</option>)}
               </select>
             </label>
-          ))}
-          <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 11, color: "#64748b", minWidth: 150 }}>
-            Combination Therapy
-            <select value={form.combinationTherapy} onChange={e => setForm(f => ({ ...f, combinationTherapy: e.target.value }))} style={{ padding: "5px 8px", border: "1px solid #e2e8f0", borderRadius: 5, fontSize: 12 }}>
-              <option value="">None</option>
-              {THERAPIES.filter(t => t !== form.therapy).map(o => <option key={o}>{o}</option>)}
-            </select>
-          </label>
-          {(form.therapy === "Atropine" || form.combinationTherapy === "Atropine") && (
-            <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 11, color: "#64748b", minWidth: 130 }}>
-              Atropine Concentration
-              <select value={form.atropineConc || ""} onChange={e => setForm(f => ({ ...f, atropineConc: e.target.value }))} style={{ padding: "5px 8px", border: "1px solid #e2e8f0", borderRadius: 5, fontSize: 12 }}>
-                <option value="">Select…</option>
-                <option>0.01%</option><option>0.025%</option><option>0.05%</option><option>0.1%</option><option>Other</option>
-              </select>
-              {form.atropineConc === "Other" && <input placeholder="e.g. 0.02%" value={form.atropineConcOther || ""} onChange={e => setForm(f => ({ ...f, atropineConcOther: e.target.value }))} style={{ padding: "5px 8px", border: "1px solid #e2e8f0", borderRadius: 5, fontSize: 12, marginTop: 4 }} />}
-            </label>
-          )}
-          <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 11, color: "#64748b" }}>
-            Therapy Start Date
-            <input type="date" value={form.therapyStartDate} onChange={e => setForm(f => ({ ...f, therapyStartDate: e.target.value }))} style={{ padding: "5px 8px", border: "1px solid #e2e8f0", borderRadius: 5, fontSize: 12 }} />
-          </label>
-          {form.therapy === "Ortho-K" && (
+            {(form.therapy === "Atropine" || form.combinationTherapy === "Atropine") && (
+              <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 11, color: "#64748b", minWidth: 130 }}>
+                Atropine Conc.
+                <select value={form.atropineConc} onChange={e => setForm(f => ({ ...f, atropineConc: e.target.value }))} style={{ padding: "5px 8px", border: "1px solid #e2e8f0", borderRadius: 5, fontSize: 12 }}>
+                  <option value="">Select…</option>
+                  <option>0.01%</option><option>0.025%</option><option>0.05%</option><option>0.1%</option><option>Other</option>
+                </select>
+                {form.atropineConc === "Other" && <input placeholder="e.g. 0.02%" value={form.atropineConcOther} onChange={e => setForm(f => ({ ...f, atropineConcOther: e.target.value }))} style={{ padding: "5px 8px", border: "1px solid #e2e8f0", borderRadius: 5, fontSize: 12, marginTop: 4 }} />}
+              </label>
+            )}
             <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 11, color: "#64748b" }}>
-              Warranty Order Date
-              <input type="date" value={form.warrantyOrderDate} onChange={e => setForm(f => ({ ...f, warrantyOrderDate: e.target.value }))} style={{ padding: "5px 8px", border: "1px solid #e2e8f0", borderRadius: 5, fontSize: 12 }} />
+              Therapy Start
+              <input type="date" value={form.therapyStartDate} onChange={e => setForm(f => ({ ...f, therapyStartDate: e.target.value }))} style={{ padding: "5px 8px", border: "1px solid #e2e8f0", borderRadius: 5, fontSize: 12 }} />
             </label>
-          )}
-          <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 11, color: "#64748b", flex: "1 1 200px" }}>
-            Staff Notes (internal)
-            <input value={form.internalNotes} onChange={e => setForm(f => ({ ...f, internalNotes: e.target.value }))} style={{ padding: "5px 8px", border: "1px solid #e2e8f0", borderRadius: 5, fontSize: 12 }} />
-          </label>
-          <button onClick={save} style={btnStyle("#0f4c75")}>Save</button>
-          <button onClick={() => setEditing(false)} style={btnStyle("#94a3b8")}>Cancel</button>
+            {form.therapy === "Ortho-K" && (
+              <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 11, color: "#64748b" }}>
+                Warranty Order Date
+                <input type="date" value={form.warrantyOrderDate} onChange={e => setForm(f => ({ ...f, warrantyOrderDate: e.target.value }))} style={{ padding: "5px 8px", border: "1px solid #e2e8f0", borderRadius: 5, fontSize: 12 }} />
+              </label>
+            )}
+          </div>
+          {/* New fields row */}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 12 }}>
+            <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 11, color: "#64748b", minWidth: 130 }}>
+              Parent 1 Myopia
+              <select value={form.parent1Myopia} onChange={e => setForm(f => ({ ...f, parent1Myopia: e.target.value }))} style={{ padding: "5px 8px", border: "1px solid #e2e8f0", borderRadius: 5, fontSize: 12 }}>
+                <option value="">Unknown</option>
+                {PARENT_MYOPIA_OPTS.map(o => <option key={o}>{o}</option>)}
+              </select>
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 11, color: "#64748b", minWidth: 130 }}>
+              Parent 2 Myopia
+              <select value={form.parent2Myopia} onChange={e => setForm(f => ({ ...f, parent2Myopia: e.target.value }))} style={{ padding: "5px 8px", border: "1px solid #e2e8f0", borderRadius: 5, fontSize: 12 }}>
+                <option value="">Unknown</option>
+                {PARENT_MYOPIA_OPTS.map(o => <option key={o}>{o}</option>)}
+              </select>
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 11, color: "#64748b", minWidth: 130 }}>
+              BV Risk
+              <select value={form.bvRisk} onChange={e => setForm(f => ({ ...f, bvRisk: e.target.value }))} style={{ padding: "5px 8px", border: "1px solid #e2e8f0", borderRadius: 5, fontSize: 12 }}>
+                {BV_RISK_OPTS.map(o => <option key={o}>{o}</option>)}
+              </select>
+            </label>
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 12 }}>
+            <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 11, color: "#64748b", flex: "1 1 200px" }}>
+              ⚠️ Staff Alert (internal, shown at top of chart)
+              <input value={form.staffAlert} onChange={e => setForm(f => ({ ...f, staffAlert: e.target.value }))} style={{ padding: "5px 8px", border: "1px solid #fcd34d", borderRadius: 5, fontSize: 12, background: "#fffbeb" }} />
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 11, color: "#64748b", flex: "2 1 300px" }}>
+              📝 Notes
+              <textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} rows={3} style={{ padding: "5px 8px", border: "1px solid #e2e8f0", borderRadius: 5, fontSize: 12, resize: "vertical", fontFamily: "Georgia, serif" }} />
+            </label>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={save} style={btnStyle("#0f4c75")}>Save</button>
+            <button onClick={() => setEditing(false)} style={btnStyle("#94a3b8")}>Cancel</button>
+          </div>
         </div>
       );
     }
 
-    function PatientView({ patient, activeTab, setActiveTab, onBack, onUpdate, pushUndo, undoStack, setUndoStack, doctors, locations }) {
-      const TABS = ["overview","timeline","al-refraction","al-graph","lens-history","events","export"];
-      const TAB_LABELS = { overview:"Overview","al-refraction":"AL & Refractions","al-graph":"AL Graph","lens-history":"Lens History",events:"Events",timeline:"Timeline",export:"Export" };
+    function PatientView({ patient, activeTab, setActiveTab, onBack, onUpdate, pushUndo, undoStack, setUndoStack, doctors, locations, clinicalTypes, adminTypes, bvTests }) {
+      const TABS = ["overview","timeline","al-graph","lens-history","bv","export"];
+      const TAB_LABELS = { overview:"Overview", timeline:"Timeline", "al-graph":"AL Graph", "lens-history":"Lens History", bv:"BV", export:"Export" };
       return (
-        <div style={{ maxWidth: 960, margin: "0 auto", padding: "20px 16px" }}>
+        <div style={{ maxWidth: 980, margin: "0 auto", padding: "20px 16px" }}>
           <button onClick={onBack} style={{ background: "none", border: "none", color: "#3b82f6", cursor: "pointer", fontSize: 13, marginBottom: 12, display: "flex", alignItems: "center", gap: 4 }}>← Back to Search</button>
-          {patient.internalNotes && <div style={{ background: "#fef3c7", border: "1px solid #fcd34d", borderRadius: 8, padding: "10px 16px", marginBottom: 12, fontSize: 13, color: "#92400e" }}><span style={{ fontWeight: 700 }}>📌 Staff Note (not exported):</span> {patient.internalNotes}</div>}
+
+          {/* Staff Alert */}
+          {patient.staffAlert && (
+            <div style={{ background: "#fef3c7", border: "1px solid #fcd34d", borderRadius: 8, padding: "10px 16px", marginBottom: 8, fontSize: 13, color: "#92400e" }}>
+              <span style={{ fontWeight: 700 }}>⚠️ Staff Alert:</span> {patient.staffAlert}
+            </div>
+          )}
+          {/* Notes */}
+          {patient.notes && (
+            <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "10px 16px", marginBottom: 8, fontSize: 13, color: "#475569" }}>
+              <span style={{ fontWeight: 700 }}>📝 Notes:</span> {patient.notes}
+            </div>
+          )}
+
           <div style={{ background: "#fff", borderRadius: 12, boxShadow: "0 2px 12px rgba(0,0,0,0.07)", padding: "18px 22px", marginBottom: 2 }}>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 16, alignItems: "flex-start" }}>
               <div style={{ flex: 1, minWidth: 220 }}>
@@ -1222,37 +1372,40 @@
                 <TherapyBadge therapy={patient.therapy} />
                 {patient.combinationTherapy && <><span style={{ fontSize: 10, color: "#64748b" }}>+</span><TherapyBadge therapy={patient.combinationTherapy} /><span style={{ fontSize: 10, color: "#64748b", fontStyle: "italic" }}>combo</span></>}
                 <span style={{ fontSize: 12, color: patient.status === "Active" ? "#16a34a" : "#94a3b8", border: "1px solid currentColor", borderRadius: 20, padding: "2px 10px" }}>{patient.status}</span>
+                {patient.bvRisk && patient.bvRisk !== "Not assessed" && (
+                  <span style={{ fontSize: 11, background: patient.bvRisk === "Significant" ? "#fff1f2" : patient.bvRisk === "Monitor" ? "#fef3c7" : "#f0fdf4", color: patient.bvRisk === "Significant" ? "#dc2626" : patient.bvRisk === "Monitor" ? "#92400e" : "#16a34a", border: "1px solid currentColor", borderRadius: 20, padding: "2px 10px" }}>BV: {patient.bvRisk}</span>
+                )}
               </div>
             </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 20, marginTop: 12, fontSize: 13, color: "#475569" }}>
-              <span>📍 {patient.location}</span>
-              <span>👨‍⚕️ Initiating: <strong>{patient.initiatingDoctor}</strong></span>
-              <span>🩺 Managing: <strong>{patient.managingDoctor || patient.initiatingDoctor}</strong></span>
-              {patient.therapyStartDate && <span>📅 Therapy start: <strong>{fmtDate(patient.therapyStartDate)}</strong></span>}
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 16, marginTop: 10, fontSize: 12, color: "#475569" }}>
+              <span>👨‍⚕️ {patient.initiatingDoctor} (init) · {patient.managingDoctor || patient.initiatingDoctor} (managing)</span>
+              {patient.therapyStartDate && <span>📅 Tx start: <strong>{fmtDate(patient.therapyStartDate)}</strong></span>}
+              {patient.parent1Myopia && <span>👤 Parent 1: <strong>{patient.parent1Myopia}</strong></span>}
+              {patient.parent2Myopia && <span>👤 Parent 2: <strong>{patient.parent2Myopia}</strong></span>}
               {(patient.therapy === "Atropine" || patient.combinationTherapy === "Atropine") && patient.atropineConc && (
-                <span>💊 Atropine: <strong>{patient.atropineConc === "Other" ? (patient.atropineConcOther || "Other") : patient.atropineConc}</strong></span>
+                <span>💊 Atropine: <strong>{patient.atropineConc === "Other" ? (patient.atropineConcOther||"Other") : patient.atropineConc}</strong></span>
               )}
             </div>
             <PatientHeaderEdit patient={patient} onUpdate={onUpdate} doctors={doctors} locations={locations} />
           </div>
+
           <div style={{ display: "flex", gap: 2, background: "#fff", padding: "0 4px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)", overflowX: "auto" }}>
             {TABS.map(t => <button key={t} onClick={() => setActiveTab(t)} style={{ background: activeTab === t ? "#0f4c75" : "transparent", color: activeTab === t ? "#fff" : "#64748b", border: "none", borderRadius: "6px 6px 0 0", padding: "10px 14px", cursor: "pointer", fontSize: 12, fontWeight: activeTab === t ? 700 : 400, whiteSpace: "nowrap" }}>{TAB_LABELS[t]}</button>)}
           </div>
           <div style={{ background: "#fff", borderRadius: "0 0 12px 12px", boxShadow: "0 2px 12px rgba(0,0,0,0.07)", padding: "22px", minHeight: 400 }}>
-            {activeTab === "overview"       && <OverviewTab patient={patient} onUpdate={onUpdate} />}
-            {activeTab === "al-refraction"  && <ALRefractionTab patient={patient} onUpdate={onUpdate} pushUndo={pushUndo} undoStack={undoStack} setUndoStack={setUndoStack} />}
-            {activeTab === "al-graph"       && <ALGraphTab patient={patient} />}
-            {activeTab === "lens-history"   && <LensHistoryTab patient={patient} onUpdate={onUpdate} />}
-            {activeTab === "events"         && <EventsTab patient={patient} onUpdate={onUpdate} />}
-            {activeTab === "timeline"       && <TimelineTab patient={patient} />}
-            {activeTab === "export"         && <ExportTab patient={patient} />}
+            {activeTab === "overview"      && <OverviewTab patient={patient} onUpdate={onUpdate} clinicalTypes={clinicalTypes} adminTypes={adminTypes} />}
+            {activeTab === "timeline"      && <UnifiedTimelineTab patient={patient} onUpdate={onUpdate} pushUndo={pushUndo} undoStack={undoStack} setUndoStack={setUndoStack} clinicalTypes={clinicalTypes} adminTypes={adminTypes} />}
+            {activeTab === "al-graph"      && <ALGraphTab patient={patient} />}
+            {activeTab === "lens-history"  && <LensHistoryTab patient={patient} onUpdate={onUpdate} />}
+            {activeTab === "bv"            && <BVTab patient={patient} onUpdate={onUpdate} bvTests={bvTests} />}
+            {activeTab === "export"        && <ExportTab patient={patient} />}
           </div>
         </div>
       );
     }
 
     function NewPatientModal({ onClose, onSave, doctors, locations }) {
-      const [form, setForm] = useState({ name: "", dob: "", therapyStartDate: today(), location: (locations||LOCATIONS)[0], therapy: THERAPIES[0], combinationTherapy: "", status: STATUSES[0], initiatingDoctor: (doctors||DOCTORS)[0], managingDoctor: (doctors||DOCTORS)[0], internalNotes: "", atropineConc: "", atropineConcOther: "" });
+      const [form, setForm] = useState({ name: "", dob: "", therapyStartDate: today(), location: (locations||LOCATIONS)[0], therapy: THERAPIES[0], combinationTherapy: "", status: STATUSES[0], initiatingDoctor: (doctors||DOCTORS)[0], managingDoctor: (doctors||DOCTORS)[0], staffAlert: "", notes: "", atropineConc: "", atropineConcOther: "" });
       const submit = () => { if (!form.name) return; onSave(form); };
       return (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
@@ -1262,7 +1415,7 @@
               {[["name","Full Name","text"],["dob","Date of Birth","date"],["therapyStartDate","Therapy Start Date","date"]].map(([k,l,t]) => (
                 <label key={k} style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 12, color: "#64748b" }}>{l}<input type={t} value={form[k]} onChange={e => setForm(f => ({ ...f, [k]: e.target.value }))} style={{ ...inputStyle, padding: "8px 10px" }} /></label>
               ))}
-              {[["location",(locations||LOCATIONS)],["therapy",THERAPIES],["status",STATUSES],["initiatingDoctor",(doctors||DOCTORS)],["managingDoctor",(doctors||DOCTORS)]].map(([k,opts]) => (
+              {[["location",locations||LOCATIONS],["therapy",THERAPIES],["status",STATUSES],["initiatingDoctor",doctors||DOCTORS],["managingDoctor",doctors||DOCTORS]].map(([k,opts]) => (
                 <label key={k} style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 12, color: "#64748b" }}>
                   {k==="initiatingDoctor"?"Initiating Doctor":k==="managingDoctor"?"Managing Doctor":k==="therapy"?"Primary Therapy":k.charAt(0).toUpperCase()+k.slice(1)}
                   <select value={form[k]} onChange={e => setForm(f => ({ ...f, [k]: e.target.value }))} style={{ ...inputStyle, padding: "8px 10px" }}>
@@ -1270,24 +1423,8 @@
                   </select>
                 </label>
               ))}
-              <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 12, color: "#64748b" }}>
-                Combination Therapy
-                <select value={form.combinationTherapy} onChange={e => setForm(f => ({ ...f, combinationTherapy: e.target.value }))} style={{ ...inputStyle, padding: "8px 10px" }}>
-                  <option value="">None</option>
-                  {THERAPIES.filter(t => t !== form.therapy).map(o => <option key={o}>{o}</option>)}
-                </select>
-              </label>
-              {(form.therapy === "Atropine" || form.combinationTherapy === "Atropine") && (
-                <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 12, color: "#64748b" }}>
-                  Atropine Concentration
-                  <select value={form.atropineConc} onChange={e => setForm(f => ({ ...f, atropineConc: e.target.value }))} style={{ ...inputStyle, padding: "8px 10px" }}>
-                    <option value="">Select…</option>
-                    <option>0.01%</option><option>0.025%</option><option>0.05%</option><option>0.1%</option><option>Other</option>
-                  </select>
-                  {form.atropineConc === "Other" && <input placeholder="e.g. 0.02%" value={form.atropineConcOther} onChange={e => setForm(f => ({ ...f, atropineConcOther: e.target.value }))} style={{ ...inputStyle, padding: "8px 10px", marginTop: 4 }} />}
-                </label>
-              )}
-              <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 12, color: "#64748b" }}>Internal Notes<input value={form.internalNotes} onChange={e => setForm(f => ({ ...f, internalNotes: e.target.value }))} style={{ ...inputStyle, padding: "8px 10px" }} /></label>
+              <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 12, color: "#64748b" }}>Staff Alert (optional)<input value={form.staffAlert} onChange={e => setForm(f => ({ ...f, staffAlert: e.target.value }))} style={{ ...inputStyle, padding: "8px 10px" }} /></label>
+              <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 12, color: "#64748b" }}>Notes (optional)<input value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} style={{ ...inputStyle, padding: "8px 10px" }} /></label>
             </div>
             <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
               <button onClick={submit} style={{ ...btnStyle("#0f4c75"), flex: 1, padding: "10px", fontSize: 14 }}>Create Patient</button>
@@ -1298,40 +1435,99 @@
       );
     }
 
-    function SettingsView({ doctors, locations, onSaveDoctors, onSaveLocations }) {
-      const [docList, setDocList] = useState([...doctors]);
-      const [locList, setLocList] = useState([...locations]);
+    // ── Settings View — with clinical types, admin types, BV tests ────────────
+    function TypeListEditor({ title, icon, items, onChange, placeholder }) {
+      const [newItem, setNewItem] = useState("");
+      const move = (i, dir) => {
+        const arr = [...items];
+        const j = i + dir;
+        if (j < 0 || j >= arr.length) return;
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+        onChange(arr);
+      };
+      return (
+        <div style={{ background: "#fff", borderRadius: 12, boxShadow: "0 2px 12px rgba(0,0,0,0.07)", padding: "20px 24px", marginBottom: 20 }}>
+          <div style={{ fontWeight: 700, fontSize: 15, color: "#0f4c75", marginBottom: 14 }}>{icon} {title}</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
+            {items.map((item, i) => (
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, background: "#f8fafc", borderRadius: 8, padding: "7px 12px", border: "1px solid #e2e8f0" }}>
+                <span style={{ flex: 1, fontSize: 13 }}>{item}</span>
+                <button onClick={() => move(i, -1)} disabled={i === 0} style={{ background: "none", border: "1px solid #e2e8f0", borderRadius: 4, padding: "2px 6px", cursor: "pointer", color: "#64748b", fontSize: 12 }}>↑</button>
+                <button onClick={() => move(i, 1)} disabled={i === items.length-1} style={{ background: "none", border: "1px solid #e2e8f0", borderRadius: 4, padding: "2px 6px", cursor: "pointer", color: "#64748b", fontSize: 12 }}>↓</button>
+                <button onClick={() => onChange(items.filter((_,j) => j !== i))} style={{ background: "#fce7f3", border: "none", borderRadius: 5, padding: "3px 8px", cursor: "pointer", color: "#db2777", fontSize: 12 }}>✕</button>
+              </div>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input value={newItem} onChange={e => setNewItem(e.target.value)} placeholder={placeholder}
+              style={{ ...inputStyle, flex: 1 }}
+              onKeyDown={e => { if (e.key === "Enter" && newItem.trim()) { onChange([...items, newItem.trim()]); setNewItem(""); }}} />
+            <button onClick={() => { if (newItem.trim()) { onChange([...items, newItem.trim()]); setNewItem(""); }}} style={btnStyle("#0f4c75")}>Add</button>
+          </div>
+        </div>
+      );
+    }
+
+    function SettingsView({ doctors, locations, clinicalTypes, adminTypes, bvTests, onSave }) {
+      const [docList,  setDocList]  = useState([...doctors]);
+      const [locList,  setLocList]  = useState([...locations]);
+      const [clinList, setClinList] = useState([...(clinicalTypes||DEFAULT_CLINICAL_TYPES)]);
+      const [admList,  setAdmList]  = useState([...(adminTypes||DEFAULT_ADMIN_TYPES)]);
+      const [bvList,   setBvList]   = useState([...(bvTests||DEFAULT_BV_TESTS)]);
       const [newDoc, setNewDoc] = useState("");
       const [newLoc, setNewLoc] = useState("");
       const [saved, setSaved] = useState(false);
+
       const save = async () => {
-        await onSaveDoctors(docList);
-        await onSaveLocations(locList);
+        await onSave({ doctors: docList, locations: locList, clinicalTypes: clinList, adminTypes: admList, bvTests: bvList });
         setSaved(true);
         setTimeout(() => setSaved(false), 2000);
       };
+
       return (
-        <div style={{ maxWidth: 640, margin: "0 auto", padding: "28px 20px" }}>
+        <div style={{ maxWidth: 680, margin: "0 auto", padding: "28px 20px" }}>
           <div style={{ fontWeight: 700, fontSize: 20, color: "#0f4c75", marginBottom: 4 }}>⚙️ Settings</div>
-          <div style={{ fontSize: 13, color: "#64748b", marginBottom: 24 }}>Manage doctors and locations.</div>
-          {[["Doctors","👨‍⚕️",docList,setDocList,newDoc,setNewDoc,"Dr. Name"],["Locations","📍",locList,setLocList,newLoc,setNewLoc,"Location name"]].map(([title,icon,list,setList,newVal,setNew,placeholder]) => (
-            <div key={title} style={{ background: "#fff", borderRadius: 12, boxShadow: "0 2px 12px rgba(0,0,0,0.07)", padding: "20px 24px", marginBottom: 20 }}>
-              <div style={{ fontWeight: 700, fontSize: 15, color: "#0f4c75", marginBottom: 14 }}>{icon} {title}</div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
-                {list.map((d, i) => (
-                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, background: "#f8fafc", borderRadius: 8, padding: "8px 12px", border: "1px solid #e2e8f0" }}>
-                    <span style={{ flex: 1, fontSize: 14 }}>{d}</span>
-                    <button onClick={() => setList(list.filter((_, j) => j !== i))} style={{ background: "#fce7f3", border: "none", borderRadius: 5, padding: "3px 8px", cursor: "pointer", color: "#db2777", fontSize: 12 }}>Remove</button>
-                  </div>
-                ))}
-              </div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <input value={newVal} onChange={e => setNew(e.target.value)} placeholder={placeholder} style={{ ...inputStyle, flex: 1 }} onKeyDown={e => { if (e.key === "Enter" && newVal.trim()) { setList([...list, newVal.trim()]); setNew(""); }}} />
-                <button onClick={() => { if (newVal.trim()) { setList([...list, newVal.trim()]); setNew(""); }}} style={btnStyle("#0f4c75")}>Add</button>
-              </div>
+          <div style={{ fontSize: 13, color: "#64748b", marginBottom: 24 }}>Manage doctors, locations, and event types. Changes apply across all patients.</div>
+
+          {/* Doctors */}
+          <div style={{ background: "#fff", borderRadius: 12, boxShadow: "0 2px 12px rgba(0,0,0,0.07)", padding: "20px 24px", marginBottom: 20 }}>
+            <div style={{ fontWeight: 700, fontSize: 15, color: "#0f4c75", marginBottom: 14 }}>👨‍⚕️ Doctors</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
+              {docList.map((d,i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, background: "#f8fafc", borderRadius: 8, padding: "7px 12px", border: "1px solid #e2e8f0" }}>
+                  <span style={{ flex: 1, fontSize: 13 }}>{d}</span>
+                  <button onClick={() => setDocList(docList.filter((_,j) => j !== i))} style={{ background: "#fce7f3", border: "none", borderRadius: 5, padding: "3px 8px", cursor: "pointer", color: "#db2777", fontSize: 12 }}>Remove</button>
+                </div>
+              ))}
             </div>
-          ))}
-          <button onClick={save} style={{ ...btnStyle("#22c55e"), fontSize: 14, padding: "10px 28px" }}>{saved ? "✓ Saved!" : "Save Changes"}</button>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input value={newDoc} onChange={e => setNewDoc(e.target.value)} placeholder="Dr. Name" style={{ ...inputStyle, flex: 1 }} onKeyDown={e => { if (e.key === "Enter" && newDoc.trim()) { setDocList([...docList, newDoc.trim()]); setNewDoc(""); }}} />
+              <button onClick={() => { if (newDoc.trim()) { setDocList([...docList, newDoc.trim()]); setNewDoc(""); }}} style={btnStyle("#0f4c75")}>Add</button>
+            </div>
+          </div>
+
+          {/* Locations */}
+          <div style={{ background: "#fff", borderRadius: 12, boxShadow: "0 2px 12px rgba(0,0,0,0.07)", padding: "20px 24px", marginBottom: 20 }}>
+            <div style={{ fontWeight: 700, fontSize: 15, color: "#0f4c75", marginBottom: 14 }}>📍 Locations</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
+              {locList.map((l,i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, background: "#f8fafc", borderRadius: 8, padding: "7px 12px", border: "1px solid #e2e8f0" }}>
+                  <span style={{ flex: 1, fontSize: 13 }}>{l}</span>
+                  <button onClick={() => setLocList(locList.filter((_,j) => j !== i))} style={{ background: "#fce7f3", border: "none", borderRadius: 5, padding: "3px 8px", cursor: "pointer", color: "#db2777", fontSize: 12 }}>Remove</button>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input value={newLoc} onChange={e => setNewLoc(e.target.value)} placeholder="Location name" style={{ ...inputStyle, flex: 1 }} onKeyDown={e => { if (e.key === "Enter" && newLoc.trim()) { setLocList([...locList, newLoc.trim()]); setNewLoc(""); }}} />
+              <button onClick={() => { if (newLoc.trim()) { setLocList([...locList, newLoc.trim()]); setNewLoc(""); }}} style={btnStyle("#0f4c75")}>Add</button>
+            </div>
+          </div>
+
+          <TypeListEditor title="Clinical Event Types" icon="🩺" items={clinList} onChange={setClinList} placeholder="New clinical type…" />
+          <TypeListEditor title="Admin Event Types" icon="📋" items={admList} onChange={setAdmList} placeholder="New admin type…" />
+          <TypeListEditor title="BV Tests" icon="👁" items={bvList} onChange={setBvList} placeholder="New BV test…" />
+
+          <button onClick={save} style={{ ...btnStyle("#22c55e"), fontSize: 14, padding: "10px 28px" }}>{saved ? "✓ Saved!" : "Save All Changes"}</button>
         </div>
       );
     }
@@ -1366,6 +1562,9 @@
       const [view, setView] = useState("search");
       const [doctors, setDoctors] = useState(null);
       const [locations, setLocations] = useState(null);
+      const [clinicalTypes, setClinicalTypes] = useState(null);
+      const [adminTypes, setAdminTypes] = useState(null);
+      const [bvTests, setBvTests] = useState(null);
       const [selectedId, setSelectedId] = useState(null);
       const [searchQ, setSearchQ] = useState("");
       const [filters, setFilters] = useState({ location: "", therapy: "", status: "", doctor: "" });
@@ -1375,14 +1574,23 @@
 
       useEffect(() => {
         const init = () => {
-          Promise.all([loadPatients(), loadSetting("spark-doctors"), loadSetting("spark-locations")])
-            .then(([pts, docVal, locVal]) => {
-              setPatients(pts || DEMO_PATIENTS);
-              setDoctors(docVal ? JSON.parse(docVal) : [...DOCTORS]);
-              setLocations(locVal ? JSON.parse(locVal) : [...LOCATIONS]);
-              setLoaded(true);
-              document.getElementById("loading").style.display = "none";
-            });
+          Promise.all([
+            loadPatients(),
+            loadSetting("spark-doctors"),
+            loadSetting("spark-locations"),
+            loadSetting("spark-clinical-types"),
+            loadSetting("spark-admin-types"),
+            loadSetting("spark-bv-tests"),
+          ]).then(([pts, docVal, locVal, clinVal, admVal, bvVal]) => {
+            setPatients(pts || DEMO_PATIENTS);
+            setDoctors(docVal ? JSON.parse(docVal) : [...DOCTORS]);
+            setLocations(locVal ? JSON.parse(locVal) : [...LOCATIONS]);
+            setClinicalTypes(clinVal ? JSON.parse(clinVal) : [...DEFAULT_CLINICAL_TYPES]);
+            setAdminTypes(admVal ? JSON.parse(admVal) : [...DEFAULT_ADMIN_TYPES]);
+            setBvTests(bvVal ? JSON.parse(bvVal) : [...DEFAULT_BV_TESTS]);
+            setLoaded(true);
+            document.getElementById("loading").style.display = "none";
+          });
         };
         if (window.__firebaseReady) init();
         else window.addEventListener("firebaseReady", init);
@@ -1397,6 +1605,13 @@
       if (!loaded) return null;
 
       const alerts = getAlerts(patients);
+
+      // Recent patients: sorted by last activity date, top 20
+      const recentPatients = [...patients]
+        .filter(p => getLastActivityDate(p))
+        .sort((a,b) => getLastActivityDate(b).localeCompare(getLastActivityDate(a)))
+        .slice(0, 20);
+
       const filteredPatients = patients.filter(p => {
         const q = searchQ.toLowerCase();
         if (q && !p.name.toLowerCase().includes(q)) return false;
@@ -1406,6 +1621,17 @@
         if (filters.doctor && p.initiatingDoctor !== filters.doctor && p.managingDoctor !== filters.doctor) return false;
         return true;
       });
+
+      const handleSaveSettings = async ({ doctors: d, locations: l, clinicalTypes: c, adminTypes: a, bvTests: b }) => {
+        setDoctors(d); setLocations(l); setClinicalTypes(c); setAdminTypes(a); setBvTests(b);
+        await Promise.all([
+          saveSetting("spark-doctors", JSON.stringify(d)),
+          saveSetting("spark-locations", JSON.stringify(l)),
+          saveSetting("spark-clinical-types", JSON.stringify(c)),
+          saveSetting("spark-admin-types", JSON.stringify(a)),
+          saveSetting("spark-bv-tests", JSON.stringify(b)),
+        ]);
+      };
 
       return (
         <div style={{ fontFamily: "'Georgia', serif", background: "#f0f4f8", minHeight: "100vh", color: "#1e293b" }}>
@@ -1424,11 +1650,35 @@
               <button onClick={() => setShowNewPatient(true)} style={{ background: "#22c55e", color: "#fff", border: "none", borderRadius: 6, padding: "6px 14px", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>+ New Patient</button>
             </div>
           </div>
-          {showNewPatient && <NewPatientModal onClose={() => setShowNewPatient(false)} doctors={doctors||DOCTORS} locations={locations||LOCATIONS} onSave={(p) => { const np = { ...p, id: uid(), alMeasurements: [], refractions: [], lensHistory: [], clinicalEvents: [], adminEvents: [], dismissedAlerts: [], warrantyOrderDate: null }; save([...patients, np]); setShowNewPatient(false); setSelectedId(np.id); setView("patient"); setActiveTab("overview"); }} />}
-          {view === "list" && <PatientListView patients={filteredPatients} filters={filters} setFilters={setFilters} onSelect={(id) => { setSelectedId(id); setView("patient"); setActiveTab("overview"); }} searchQ={searchQ} setSearchQ={setSearchQ} />}
-          {(view === "search" || (view === "patient" && !selectedId)) && <SearchView patients={patients} alerts={alerts} searchQ={searchQ} setSearchQ={setSearchQ} results={filteredPatients} onSelect={(id) => { setSelectedId(id); setView("patient"); setActiveTab("overview"); }} onDismissAlert={(alertId, patientId) => { const p = patients.find(x => x.id === patientId); if (!p) return; updatePatient({ ...p, dismissedAlerts: [...(p.dismissedAlerts || []), alertId] }); }} />}
-          {view === "settings" && <SettingsView doctors={doctors||DOCTORS} locations={locations||LOCATIONS} onSaveDoctors={async (d) => { setDoctors(d); await saveSetting("spark-doctors", JSON.stringify(d)); }} onSaveLocations={async (l) => { setLocations(l); await saveSetting("spark-locations", JSON.stringify(l)); }} />}
-          {view === "patient" && selectedId && selectedPatient && <PatientView patient={selectedPatient} activeTab={activeTab} setActiveTab={setActiveTab} onBack={() => { setView("search"); setSelectedId(null); }} onUpdate={updatePatient} pushUndo={pushUndo} undoStack={undoStack} setUndoStack={setUndoStack} doctors={doctors||DOCTORS} locations={locations||LOCATIONS} />}
+
+          {showNewPatient && <NewPatientModal onClose={() => setShowNewPatient(false)} doctors={doctors||DOCTORS} locations={locations||LOCATIONS}
+            onSave={(p) => {
+              const np = { ...p, id: uid(), alMeasurements: [], refractions: [], lensHistory: [], clinicalEvents: [], adminEvents: [], bvEntries: [], dismissedAlerts: [], warrantyOrderDate: null };
+              save([...patients, np]); setShowNewPatient(false); setSelectedId(np.id); setView("patient"); setActiveTab("overview");
+            }} />}
+
+          {view === "list" && <PatientListView patients={filteredPatients} filters={filters} setFilters={setFilters} onSelect={(id) => { setSelectedId(id); setView("patient"); setActiveTab("overview"); }} searchQ={searchQ} setSearchQ={setSearchQ} allLocations={locations||LOCATIONS} allDoctors={doctors||DOCTORS} />}
+
+          {(view === "search" || (view === "patient" && !selectedId)) && (
+            <SearchView alerts={alerts} searchQ={searchQ} setSearchQ={setSearchQ} results={filteredPatients}
+              onSelect={(id) => { setSelectedId(id); setView("patient"); setActiveTab("overview"); }}
+              onDismissAlert={(alertId, patientId) => { const p = patients.find(x => x.id === patientId); if (!p) return; updatePatient({ ...p, dismissedAlerts: [...(p.dismissedAlerts||[]), alertId] }); }}
+              recentPatients={recentPatients}
+            />
+          )}
+
+          {view === "settings" && <SettingsView doctors={doctors||DOCTORS} locations={locations||LOCATIONS} clinicalTypes={clinicalTypes||DEFAULT_CLINICAL_TYPES} adminTypes={adminTypes||DEFAULT_ADMIN_TYPES} bvTests={bvTests||DEFAULT_BV_TESTS} onSave={handleSaveSettings} />}
+
+          {view === "patient" && selectedId && selectedPatient && (
+            <PatientView patient={selectedPatient} activeTab={activeTab} setActiveTab={setActiveTab}
+              onBack={() => { setView("search"); setSelectedId(null); }}
+              onUpdate={updatePatient} pushUndo={pushUndo} undoStack={undoStack} setUndoStack={setUndoStack}
+              doctors={doctors||DOCTORS} locations={locations||LOCATIONS}
+              clinicalTypes={clinicalTypes||DEFAULT_CLINICAL_TYPES}
+              adminTypes={adminTypes||DEFAULT_ADMIN_TYPES}
+              bvTests={bvTests||DEFAULT_BV_TESTS}
+            />
+          )}
         </div>
       );
     }
