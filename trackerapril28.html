@@ -742,7 +742,7 @@
               { label: "Total OS Growth", value: latest && baseline ? `+${(latest.os - baseline.os).toFixed(2)} mm` : "–", icon: "→" },
               { label: "Latest AL OD", value: latest ? `${latest.od} mm` : "–", icon: "👁" },
               { label: "Latest AL OS", value: latest ? `${latest.os} mm` : "–", icon: "👁" },
-              { label: "Last Visit", value: latest ? fmtDate(latest.date) : "–", icon: "📅" },
+
             ].map(s => (
               <div key={s.label} style={{ background: "#f8fafc", borderRadius: 10, padding: "14px 16px", border: "1px solid #e2e8f0" }}>
                 <div style={{ fontSize: 22, marginBottom: 4 }}>{s.icon}</div>
@@ -1263,6 +1263,7 @@
               <span>👨‍⚕️ Initiating: <strong>{patient.initiatingDoctor}</strong></span>
               <span>🩺 Managing: <strong>{patient.managingDoctor || patient.initiatingDoctor}</strong></span>
               {patient.therapyStartDate && <span>📅 Therapy start: <strong>{fmtDate(patient.therapyStartDate)}</strong></span>}
+              {(() => { const als = (patient.alMeasurements || []); const evts = (patient.events || []); const rxs = (patient.refractions || []); const allDates = [...als.map(m => m.date), ...evts.map(e => e.date), ...rxs.map(r => r.date)].filter(Boolean).sort((a,b) => b.localeCompare(a)); return allDates.length ? <span>🗓 Last visit: <strong>{fmtDate(allDates[0])}</strong></span> : null; })()}
               {(patient.therapy === "Atropine" || patient.combinationTherapy === "Atropine") && patient.atropineConc && (
                 <span>💊 Atropine: <strong>{patient.atropineConc === "Other" ? (patient.atropineConcOther || "Other") : patient.atropineConc}</strong></span>
               )}
