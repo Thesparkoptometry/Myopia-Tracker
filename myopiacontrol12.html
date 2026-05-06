@@ -1,0 +1,2454 @@
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNiIgZmlsbD0iIzBmNGM3NSIvPjx0ZXh0IHg9IjE2IiB5PSIyMiIgZm9udC1mYW1pbHk9IkFyaWFsLHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTIiIGZvbnQtd2VpZ2h0PSJib2xkIiBmaWxsPSJ3aGl0ZSIgdGV4dC1hbmNob3I9Im1pZGRsZSI+TU08L3RleHQ+PC9zdmc+"><!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Myopia Management — The Spark Optometry</title>
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'DM Sans', sans-serif; background: #f0f4f8; }
+    #root { min-height: 100vh; }
+    #loading { display: flex; align-items: center; justify-content: center; height: 100vh; color: #64748b; font-family: 'DM Sans', sans-serif; font-size: 15px; }
+  </style>
+</head>
+<body>
+  <div id="loading">Connecting to Firebase…</div>
+  <div id="root"></div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+    import { getStorage, ref, uploadBytesResumable, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
+    import { getFirestore, doc, getDoc, setDoc, deleteDoc, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+    const firebaseConfig = {
+      apiKey: "AIzaSyCHKMkVXYddAMKjALe6TpOZiwBQKjY7xFk",
+      authDomain: "myopia--program-tracker.firebaseapp.com",
+      projectId: "myopia--program-tracker",
+      storageBucket: "myopia--program-tracker.firebasestorage.app",
+      messagingSenderId: "482429201734",
+      appId: "1:482429201734:web:c7e81d8828a6bd16a68947",
+    };
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const storage = getStorage(app);
+    window.__db = db;
+    window.__storage = storage;
+    window.__storageUtils = { ref, uploadBytesResumable, getDownloadURL };
+    window.__firestore = { doc, getDoc, setDoc, deleteDoc, collection, getDocs };
+    window.__firebaseReady = true;
+    window.dispatchEvent(new Event("firebaseReady"));
+  </script>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useCallback } = React;
+
+    async function loadPatients() {
+      try {
+        const { collection, getDocs } = window.__firestore;
+        const snap = await getDocs(collection(window.__db, "patients"));
+        if (!snap.empty) return snap.docs.map(d => d.data());
+      } catch (e) { console.error("loadPatients error", e); }
+      return null;
+    }
+    async function savePatients(pts) {
+      try {
+        const { doc, setDoc } = window.__firestore;
+        await Promise.all(pts.map(p => setDoc(doc(window.__db, "patients", p.id), p)));
+      } catch (e) { console.error("savePatients error", e); }
+    }
+    async function loadSetting(key) {
+      try {
+        const { doc, getDoc } = window.__firestore;
+        const snap = await getDoc(doc(window.__db, "settings", key));
+        if (snap.exists()) return snap.data().value;
+      } catch {}
+      return null;
+    }
+    async function saveSetting(key, value) {
+      try {
+        const { doc, setDoc } = window.__firestore;
+        await setDoc(doc(window.__db, "settings", key), { value });
+      } catch (e) { console.error("saveSetting error", e); }
+    }
+
+    const LOCATIONS = ["Santa Clara", "Fremont", "Walnut Creek", "Sunnyvale"];
+    const DOCTORS = ["Dr. Yang", "Dr. Fan", "Dr. Ghag", "Dr. Pan", "Dr. Kha", "Dr. Kaneta", "Dr. Zhang", "Dr. Shah", "Dr. Luong"];
+    const THERAPIES = ["Ortho-K", "MiSight", "Atropine", "Stellest", "Monitoring", "AL Only"];
+    const STATUSES = ["Active", "Inactive", "Graduated", "Lost to Follow-up"];
+    const THERAPY_COLORS = {
+      "Ortho-K":    { bg: "#dbeafe", text: "#1d4ed8", border: "#93c5fd" },
+      "MiSight":    { bg: "#d1fae5", text: "#065f46", border: "#6ee7b7" },
+      "Atropine":   { bg: "#fef3c7", text: "#92400e", border: "#fcd34d" },
+      "Stellest":   { bg: "#f3e8ff", text: "#6b21a8", border: "#c084fc" },
+      "Monitoring": { bg: "#f1f5f9", text: "#475569", border: "#94a3b8" },
+      "AL Only":    { bg: "#fff1f2", text: "#9f1239", border: "#fda4af" },
+    };
+
+    const DEFAULT_CLINICAL_TYPES = [
+      "Program Follow Up","AL Measurement","Refraction","Lens Fit",
+      "Follow-up Visit","Yearly Comprehensive Exam","Myopia Consult",
+      "Treatment Change","Medical Visit","Topography","Phone/Email Consult","Other Clinical"
+    ];
+    const DEFAULT_ADMIN_TYPES = [
+      "Program Renewal","Payment","Lens Order - Warranted","Lens Order - Non-Warranted",
+      "Rx Renewal","Insurance Auth","Parent Communication","Ortho-K Back-up Pair Ordered","Ortho-K Warranty Expiry",
+      "Other Admin","No Show"
+    ];
+    const DEFAULT_BV_TESTS = [
+      "Near Phoria (eso/exo)","Distance Phoria","MEM","NPC","Stereo","NRA/PRA",
+      "Vergence Ranges (BI)","Vergence Ranges (BO)","AC/A Ratio","Other BV"
+    ];
+
+    const PARENT_MYOPIA_OPTS = ["Unknown","None","Mild (-1 to -3)","Moderate (-3 to -6)","High (> -6)"];
+    const BV_RISK_OPTS = ["Not assessed","Normal","Monitor","Significant"];
+
+    function uid() { return Math.random().toString(36).slice(2, 9); }
+    function today() { return new Date().toISOString().slice(0, 10); }
+    function fmtDate(d) {
+      if (!d) return "";
+      const dt = new Date(d + "T00:00:00");
+      return dt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    }
+    function parseDate(s) { return s ? new Date(s + "T00:00:00") : null; }
+    function daysBetween(a, b) { return Math.round((b - a) / 86400000); }
+    function durationLabel(a, b) {
+      const totalDays = daysBetween(a, b);
+      if (totalDays <= 0) return "0 d";
+      const years = Math.floor(totalDays / 365.25);
+      const remAfterYears = totalDays - Math.round(years * 365.25);
+      const months = Math.floor(remAfterYears / 30.44);
+      const remAfterMonths = Math.round(remAfterYears - months * 30.44);
+      const weeks = Math.floor(remAfterMonths / 7);
+      const days = remAfterMonths % 7;
+      const parts = [];
+      if (years > 0) parts.push(`${years} yr`);
+      if (months > 0) parts.push(`${months} mo`);
+      if (weeks > 0) parts.push(`${weeks} wk`);
+      if (days > 0 && years === 0 && months === 0) parts.push(`${days} d`);
+      return parts.join(" ") || "0 d";
+    }
+    function sgnFmt(n, decimals = 2) {
+      if (n === null || n === undefined || isNaN(n)) return "-";
+      return (n >= 0 ? "+" : "") + n.toFixed(decimals);
+    }
+    function displayName(fullName) {
+      if (!fullName) return "";
+      const parts = fullName.trim().split(/\s+/);
+      if (parts.length === 1) return parts[0];
+      return `${parts[0]} ${parts[parts.length - 1][0]}.`;
+    }
+    function ageLabel(dob) {
+      if (!dob) return "";
+      const birth = new Date(dob + "T00:00:00");
+      const now = new Date();
+      let years = now.getFullYear() - birth.getFullYear();
+      let months = now.getMonth() - birth.getMonth();
+      if (months < 0) { years--; months += 12; }
+      const parts = [];
+      if (years > 0) parts.push(`${years} yr`);
+      if (months > 0) parts.push(`${months} mo`);
+      return parts.join(" ") || "< 1 mo";
+    }
+    function getLastActivityDate(p) {
+      const dates = [
+        ...(p.alMeasurements||[]).map(x=>x.date),
+        ...(p.refractions||[]).map(x=>x.date),
+        ...(p.clinicalEvents||[]).map(x=>x.date),
+        ...(p.adminEvents||[]).map(x=>x.date),
+        ...(p.lensHistory||[]).map(x=>x.date),
+        ...(p.bvEntries||[]).map(x=>x.date),
+      ].filter(Boolean);
+      return dates.length ? dates.sort().reverse()[0] : "";
+    }
+    function getTherapyDate(p) {
+      const renewals = (p.adminEvents||[])
+        .filter(e => e.type === "Program Renewal").map(e => e.date).filter(Boolean);
+      const candidates = [...(p.therapyStartDate ? [p.therapyStartDate] : []), ...renewals].filter(Boolean);
+      return candidates.length ? candidates.sort().reverse()[0] : "";
+    }
+    function usesLens(p) {
+      return p.therapy === "Ortho-K" || p.therapy === "MiSight" ||
+             p.combinationTherapy === "Ortho-K" || p.combinationTherapy === "MiSight";
+    }
+
+    const DEMO_PATIENTS = [
+      {
+        id: "p1", name: "Marcus Chen", dob: "2014-03-15", location: "Fremont",
+        therapy: "Ortho-K", combinationTherapy: "", status: "Active",
+        initiatingDoctor: "Dr. Yang", managingDoctor: "Dr. Yang",
+        therapyStartDate: "2022-02-01",
+        staffAlert: "Father is also highly myopic. Push AL measurements Q3mo.",
+        notes: "Parent very engaged. Prefers email communication.",
+        parent1Myopia: "High (> -6)", parent2Myopia: "Mild (-1 to -3)", bvRisk: "Normal",
+        alMeasurements: [
+          { id: "al1", date: "2022-01-10", od: 24.21, os: 24.18, notes: "Baseline" },
+          { id: "al2", date: "2022-04-15", od: 24.35, os: 24.30, notes: "3 mo f/u" },
+          { id: "al3", date: "2022-07-20", od: 24.48, os: 24.44, notes: "6 mo f/u" },
+          { id: "al4", date: "2022-10-05", od: 24.58, os: 24.55, notes: "" },
+          { id: "al5", date: "2023-01-18", od: 24.65, os: 24.63, notes: "1 yr" },
+          { id: "al6", date: "2023-07-12", od: 24.71, os: 24.69, notes: "18 mo" },
+          { id: "al7", date: "2024-01-08", od: 24.76, os: 24.74, notes: "2 yr" },
+          { id: "al8", date: "2024-07-15", od: 24.79, os: 24.78, notes: "" },
+          { id: "al9", date: "2025-01-20", od: 24.82, os: 24.80, notes: "3 yr" },
+        ],
+        refractions: [
+          { id: "r1", date: "2022-01-10", odSph: -3.25, odCyl: -0.50, odAxis: 180, odVA: "20/20", osSph: -3.00, osCyl: -0.25, osAxis: 175, osVA: "20/20" },
+          { id: "r2", date: "2022-07-20", odSph: -3.50, odCyl: -0.50, odAxis: 180, odVA: "20/20", osSph: -3.25, osCyl: -0.25, osAxis: 175, osVA: "20/20" },
+          { id: "r3", date: "2023-01-18", odSph: -3.75, odCyl: -0.75, odAxis: 180, odVA: "20/20", osSph: -3.50, osCyl: -0.25, osAxis: 175, osVA: "20/20" },
+          { id: "r4", date: "2024-01-08", odSph: -3.75, odCyl: -0.75, odAxis: 180, odVA: "20/20", osSph: -3.50, osCyl: -0.50, osAxis: 170, osVA: "20/20" },
+          { id: "r5", date: "2025-01-20", odSph: -4.00, odCyl: -0.75, odAxis: 180, odVA: "20/20", osSph: -3.75, osCyl: -0.50, osAxis: 170, osVA: "20/20" },
+        ],
+        lensHistory: [
+          { id: "l1", date: "2022-02-01", type: "Ortho-K", odBC: 8.4, odPower: -3.25, odDiam: 10.5, odRZD1: 530, odRZD2: 530, odLZA1: 33, odLZA2: 33, odColor: "Green", osBC: 8.5, osPower: -3.00, osDiam: 10.5, osRZD1: 530, osRZD2: 530, osLZA1: 33, osLZA2: 33, osColor: "Blue", reason: "Initial fit" },
+        ],
+        clinicalEvents: [
+          { id: "ce1", date: "2022-01-10", type: "AL Measurement", notes: "Baseline visit." },
+          { id: "ce2", date: "2022-02-01", type: "Lens Fit", notes: "Initial Paragon CRT fit." },
+          { id: "ce5", date: "2025-01-20", type: "Yearly Comprehensive Exam", notes: "Annual comprehensive." },
+        ],
+        adminEvents: [
+          { id: "ae1", date: "2022-02-05", type: "Lens Order - Warranted", notes: "Paragon CRT ordered." },
+          { id: "ae3", date: "2023-01-20", type: "Rx Renewal", notes: "Annual renewal signed." },
+        ],
+        bvEntries: [], dismissedAlerts: [], warrantyOrderDate: "2023-02-15",
+      },
+      {
+        id: "p2", name: "Sophia Patel", dob: "2013-07-22", location: "Santa Clara",
+        therapy: "MiSight", combinationTherapy: "", status: "Active",
+        initiatingDoctor: "Dr. Fan", managingDoctor: "Dr. Fan",
+        therapyStartDate: "2021-10-01", staffAlert: "",
+        notes: "Mom asks lots of questions. Send post-visit summary email each time.",
+        parent1Myopia: "Moderate (-3 to -6)", parent2Myopia: "None", bvRisk: "Monitor",
+        alMeasurements: [
+          { id: "al1", date: "2021-09-05", od: 24.50, os: 24.45, notes: "Baseline" },
+          { id: "al2", date: "2022-03-10", od: 24.72, os: 24.67, notes: "" },
+          { id: "al3", date: "2022-09-08", od: 24.90, os: 24.86, notes: "" },
+          { id: "al4", date: "2023-03-15", od: 25.05, os: 25.01, notes: "" },
+          { id: "al5", date: "2023-09-20", od: 25.16, os: 25.13, notes: "" },
+          { id: "al6", date: "2024-03-12", od: 25.24, os: 25.21, notes: "" },
+          { id: "al7", date: "2024-09-18", od: 25.30, os: 25.28, notes: "" },
+        ],
+        refractions: [
+          { id: "r1", date: "2021-09-05", odSph: -2.50, odCyl: 0, odAxis: 0, odVA: "20/20", osSph: -2.25, osCyl: -0.25, osAxis: 90, osVA: "20/20" },
+          { id: "r2", date: "2022-09-08", odSph: -3.00, odCyl: 0, odAxis: 0, odVA: "20/20", osSph: -2.75, osCyl: -0.25, osAxis: 90, osVA: "20/20" },
+          { id: "r3", date: "2024-09-18", odSph: -3.50, odCyl: -0.25, odAxis: 5, odVA: "20/20", osSph: -3.25, osCyl: -0.25, osAxis: 90, osVA: "20/20" },
+        ],
+        lensHistory: [],
+        clinicalEvents: [
+          { id: "ce1", date: "2021-09-05", type: "AL Measurement", notes: "Baseline." },
+          { id: "ce4", date: "2024-03-12", type: "Follow-up Visit", notes: "Discussed possible switch to Stellest." },
+        ],
+        adminEvents: [{ id: "ae1", date: "2021-10-01", type: "Rx Renewal", notes: "Annual supply ordered." }],
+        bvEntries: [
+          { id: "bv1", date: "2024-03-12", results: { "Near Phoria (eso/exo)": "4 eso", "MEM": "+0.50", "NPC": "5 cm", "Stereo": "40 sec arc" }, notes: "Mild esophoria at near" }
+        ],
+        dismissedAlerts: [], warrantyOrderDate: null,
+      },
+      {
+        id: "p3", name: "Ethan Nguyen", dob: "2015-11-30", location: "Walnut Creek",
+        therapy: "Atropine", combinationTherapy: "", status: "Active",
+        initiatingDoctor: "Dr. Ghag", managingDoctor: "Dr. Ghag",
+        therapyStartDate: "2023-02-20",
+        staffAlert: "Compliance concern — check in at every visit",
+        notes: "Ortho-K not suitable. On 0.05% atropine. Monitor for rebound.",
+        parent1Myopia: "High (> -6)", parent2Myopia: "Mild (-1 to -3)", bvRisk: "Not assessed",
+        alMeasurements: [
+          { id: "al1", date: "2023-02-14", od: 23.80, os: 23.75, notes: "Baseline" },
+          { id: "al2", date: "2023-08-10", od: 23.95, os: 23.91, notes: "" },
+          { id: "al3", date: "2024-02-20", od: 24.05, os: 24.01, notes: "" },
+          { id: "al5", date: "2025-02-10", od: 24.18, os: 24.16, notes: "" },
+        ],
+        refractions: [
+          { id: "r1", date: "2023-02-14", odSph: -1.75, odCyl: -0.50, odAxis: 90, odVA: "20/20", osSph: -1.50, osCyl: -0.50, osAxis: 85, osVA: "20/20" },
+          { id: "r2", date: "2025-02-10", odSph: -2.25, odCyl: -0.50, odAxis: 90, odVA: "20/20", osSph: -2.00, osCyl: -0.50, osAxis: 85, osVA: "20/20" },
+        ],
+        lensHistory: [],
+        clinicalEvents: [
+          { id: "ce1", date: "2023-02-14", type: "AL Measurement", notes: "Baseline. Started 0.05% atropine." },
+          { id: "ce4", date: "2025-02-10", type: "Follow-up Visit", notes: "Continued good response." },
+        ],
+        adminEvents: [{ id: "ae1", date: "2023-02-20", type: "Rx Renewal", notes: "0.05% atropine compounded. 3mo supply." }],
+        bvEntries: [], dismissedAlerts: [], warrantyOrderDate: null,
+      },
+    ];
+
+    function getPatientWarrantyInfo(p) {
+      const entries = (p.lensHistory||[]).filter(l => l.warrantyStart);
+      if (!entries.length) return null;
+      const latest = entries.sort((a,b) => b.warrantyStart.localeCompare(a.warrantyStart))[0];
+      const startDt = parseDate(latest.warrantyStart);
+      const months = latest.warrantyMonths ? parseFloat(latest.warrantyMonths) : 4;
+      const expiry = new Date(startDt.getTime() + months * 30.44 * 86400000);
+      // Check admin events for a backup pair order that voids the warranty
+      const voidEvent = (p.adminEvents||[])
+        .filter(e => e.type === "Ortho-K Back-up Pair Ordered" && e.warrantyVoided)
+        .sort((a,b) => b.date.localeCompare(a.date))[0];
+      return { expiry, voided: !!voidEvent, voidDate: voidEvent ? (voidEvent.voidDate || voidEvent.date) : null };
+    }
+    // backward-compat alias
+    function getPatientWarrantyExpiry(p) {
+      const info = getPatientWarrantyInfo(p);
+      return info ? info.expiry : null;
+    }
+
+    function getWarrantyColor(daysLeft) {
+      if (daysLeft < 0) return { bg: "#fff1f2", text: "#dc2626", border: "#fecaca" };
+      if (daysLeft <= 14) return { bg: "#fff1f2", text: "#dc2626", border: "#fecaca" };
+      if (daysLeft <= 30) return { bg: "#fef3c7", text: "#92400e", border: "#fcd34d" };
+      return { bg: "#f1f5f9", text: "#475569", border: "#e2e8f0" };
+    }
+
+    function getAlerts(patients) {
+      const now = new Date();
+      const alerts = [];
+      for (const p of patients) {
+        if (!Array.isArray(p.dismissedAlerts)) p.dismissedAlerts = [];
+        const wInfo = getPatientWarrantyInfo(p);
+        const expiryDt = wInfo ? wInfo.expiry : null;
+        if (expiryDt && usesLens(p) && !wInfo.voided) {
+          const daysLeft = daysBetween(now, expiryDt);
+          const alertId = `warranty-${p.id}`;
+          if (daysLeft <= 30 && !p.dismissedAlerts.includes(alertId)) {
+            const isExpired = daysLeft < 0;
+            const timeStr = durationLabel(isExpired ? expiryDt : now, isExpired ? now : expiryDt);
+            alerts.push({ id: alertId, patientId: p.id, patientName: p.name, type: "warranty", label: isExpired ? `Lens warranty expired ${timeStr} ago` : `Lens warranty expires in ${timeStr}`, severity: daysLeft < 14 ? "high" : "medium" });
+          }
+        }
+        const als = [...(p.alMeasurements || [])].sort((a, b) => a.date.localeCompare(b.date));
+        if (als.length >= 2) {
+          const last = als[als.length - 1], prev = als[als.length - 2];
+          const days = daysBetween(parseDate(prev.date), parseDate(last.date));
+          if (days > 0) {
+            const annualized = ((parseFloat(last.od) - parseFloat(prev.od)) / days) * 365;
+            const alertId = `al-prog-${p.id}`;
+            if (annualized > 0.3 && !p.dismissedAlerts.includes(alertId))
+              alerts.push({ id: alertId, patientId: p.id, patientName: p.name, type: "progression", label: `Progressing AL: ${sgnFmt(annualized)} mm/yr annualized (OD)`, severity: annualized > 0.5 ? "high" : "medium" });
+          }
+        }
+      }
+      return alerts;
+    }
+
+    function generateStory(patient) {
+      const als = [...(patient.alMeasurements || [])].sort((a, b) => a.date.localeCompare(b.date));
+      if (als.length < 2) return { narrative: "Not enough data to generate a clinical story.", tableRows: [], clinicalNotes: [], interpretation: "" };
+      const latest = als[als.length - 1], baseline = als[0];
+      const latestDt = parseDate(latest.date), baselineDt = parseDate(baseline.date);
+      const totalDays = daysBetween(baselineDt, latestDt);
+      const totalOD = parseFloat(latest.od) - parseFloat(baseline.od), totalOS = parseFloat(latest.os) - parseFloat(baseline.os);
+      const annualOD = totalDays > 0 ? (totalOD / totalDays) * 365 : 0;
+      const annualOS = totalDays > 0 ? (totalOS / totalDays) * 365 : 0;
+      const prev = als[als.length - 2];
+      const prevDt = parseDate(prev.date);
+      const intervalOD = parseFloat(latest.od) - parseFloat(prev.od), intervalOS = parseFloat(latest.os) - parseFloat(prev.os);
+      const intervalLabel = durationLabel(prevDt, latestDt);
+      const targets = [{ label: "~3 mo", days: 91 }, { label: "~6 mo", days: 182 }, { label: "~12 mo", days: 365 }, { label: "Baseline", days: totalDays }];
+      const tableRows = [];
+      for (const t of targets) {
+        const closest = als.slice(0, -1).reduce((best, m) => {
+          const diff = Math.abs(daysBetween(parseDate(m.date), latestDt) - t.days);
+          return diff < Math.abs(daysBetween(parseDate(best.date), latestDt) - t.days) ? m : best;
+        }, als[0]);
+        const closestDays = daysBetween(parseDate(closest.date), latestDt);
+        if (Math.abs(closestDays - t.days) > t.days * 0.5) continue;
+        tableRows.push({ label: t.label === "Baseline" ? "Baseline" : durationLabel(parseDate(closest.date), latestDt), date: closest.date, dOD: latest.od - closest.od, dOS: latest.os - closest.os });
+      }
+      const clinicalNotes = (patient.clinicalEvents || []).filter(e => { const ed = parseDate(e.date); return ed >= baselineDt && ed <= latestDt; }).map(e => `${fmtDate(e.date)}: ${e.type}${e.notes ? " — " + e.notes : ""}`);
+      let interp = annualOD <= 0.10 ? "AL growth is minimal and may indicate near-stabilization."
+        : annualOD <= 0.20 ? "AL growth is below the high-risk threshold. Current treatment appears to be providing good control."
+        : annualOD <= 0.30 ? "AL growth is moderate. Consider whether intensification or combination therapy is warranted."
+        : "AL growth exceeds 0.30 mm/yr. Evaluate treatment escalation or combination therapy.";
+      const rxs = [...(patient.refractions || [])].sort((a, b) => a.date.localeCompare(b.date));
+      const baselineRx = rxs[0], latestRx = rxs[rxs.length - 1];
+      const fmtSph = (s) => s !== undefined ? `${Number(s) >= 0 ? "+" : ""}${Number(s).toFixed(2)}` : "–";
+      let rxSentence = "";
+      if (latestRx) {
+        const lStr = `OD ${fmtSph(latestRx.odSph)}${latestRx.odCyl && latestRx.odCyl !== 0 ? ` ${fmtSph(latestRx.odCyl)} ×${latestRx.odAxis}°` : " sph"} / OS ${fmtSph(latestRx.osSph)}${latestRx.osCyl && latestRx.osCyl !== 0 ? ` ${fmtSph(latestRx.osCyl)} ×${latestRx.osAxis}°` : " sph"}`;
+        if (baselineRx && baselineRx.date !== latestRx.date) {
+          const bStr = `OD ${fmtSph(baselineRx.odSph)} / OS ${fmtSph(baselineRx.osSph)}`;
+          rxSentence = ` Refractive error progressed from ${bStr} at baseline to ${lStr}, a change of ${fmtSph(Number(latestRx.odSph) - Number(baselineRx.odSph))} D OD and ${fmtSph(Number(latestRx.osSph) - Number(baselineRx.osSph))} D OS.`;
+        } else { rxSentence = ` Current refractive error is ${lStr}.`; }
+      }
+      const narrative = `${displayName(patient.name)} has been followed from baseline on ${fmtDate(baseline.date)} through ${fmtDate(latest.date)} — ${durationLabel(baselineDt, latestDt)}. Total axial length growth: ${sgnFmt(totalOD)} mm OD and ${sgnFmt(totalOS)} mm OS, yielding ${sgnFmt(annualOD)} mm/yr OD and ${sgnFmt(annualOS)} mm/yr OS. The most recent interval (${intervalLabel}) showed ${sgnFmt(intervalOD)} mm OD and ${sgnFmt(intervalOS)} mm OS.${rxSentence}`;
+      return { narrative, tableRows, clinicalNotes, interpretation: interp, annualOD, annualOS, baseline, latest };
+    }
+
+    const th = { textAlign: "left", padding: "6px 8px", fontWeight: 700, fontSize: 11, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.4, background: "#f1f5f9", border: "1px solid #e2e8f0" };
+    const td = { padding: "5px 8px", border: "1px solid #f1f5f9", fontSize: 13, verticalAlign: "middle" };
+    const inputStyle = { padding: "5px 7px", border: "1px solid #e2e8f0", borderRadius: 5, fontSize: 12, fontFamily: "'DM Sans', sans-serif", width: "100%", boxSizing: "border-box" };
+    const labelStyle = { display: "flex", flexDirection: "column", gap: 2, fontSize: 11, color: "#64748b", flex: "1 1 100px" };
+    function btnStyle(bg, small) { return { background: bg, color: "#fff", border: "none", borderRadius: 5, padding: small ? "4px 10px" : "6px 12px", cursor: "pointer", fontSize: small ? 11 : 12, fontWeight: 600, fontFamily: "'DM Sans', sans-serif" }; }
+
+    function TherapyBadge({ therapy }) {
+      const c = THERAPY_COLORS[therapy] || { bg: "#f3f4f6", text: "#374151", border: "#d1d5db" };
+      return <span style={{ background: c.bg, color: c.text, border: `1px solid ${c.border}`, borderRadius: 20, padding: "2px 9px", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>{therapy}</span>;
+    }
+
+    function ALGraph({ patient }) {
+      const canvasRef = useRef(null);
+      const [tooltip, setTooltip] = useState(null);
+      const pointsRef = useRef([]);
+      const drawGraph = useCallback(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const ctx = canvas.getContext("2d");
+        const als = [...(patient.alMeasurements || [])].sort((a, b) => a.date.localeCompare(b.date));
+        if (als.length < 2) { ctx.clearRect(0, 0, canvas.width, canvas.height); return; }
+        const W = canvas.width, H = canvas.height;
+        const PAD = { top: 40, right: 40, bottom: 55, left: 62 };
+        ctx.clearRect(0, 0, W, H);
+        const allVals = als.flatMap(m => [m.od, m.os]);
+        const minV = Math.min(...allVals) - 0.15, maxV = Math.max(...allVals) + 0.15;
+        const dates = als.map(m => parseDate(m.date).getTime());
+        const minD = Math.min(...dates), maxD = Math.max(...dates);
+        const toX = d => PAD.left + ((d - minD) / (maxD - minD || 1)) * (W - PAD.left - PAD.right);
+        const toY = v => H - PAD.bottom - ((v - minV) / (maxV - minV || 1)) * (H - PAD.top - PAD.bottom);
+        ctx.strokeStyle = "#e2e8f0"; ctx.lineWidth = 1;
+        for (let i = 0; i <= 4; i++) {
+          const v = minV + (maxV - minV) * (i / 4), y = toY(v);
+          ctx.beginPath(); ctx.moveTo(PAD.left, y); ctx.lineTo(W - PAD.right, y); ctx.stroke();
+          ctx.fillStyle = "#94a3b8"; ctx.font = "10px sans-serif"; ctx.textAlign = "right";
+          ctx.fillText(v.toFixed(2), PAD.left - 5, y + 4);
+        }
+        if (patient.therapyStartDate) {
+          const startTs = parseDate(patient.therapyStartDate).getTime();
+          if (startTs >= minD && startTs <= maxD) {
+            const x = toX(startTs);
+            ctx.strokeStyle = "#22c55e"; ctx.lineWidth = 1.5; ctx.setLineDash([4, 3]);
+            ctx.beginPath(); ctx.moveTo(x, PAD.top); ctx.lineTo(x, H - PAD.bottom); ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.fillStyle = "#22c55e"; ctx.font = "9px sans-serif"; ctx.textAlign = "center";
+            ctx.fillText("Tx start", x, PAD.top - 5);
+          }
+        }
+        (patient.clinicalEvents || []).filter(e => e.type === "Treatment Change").map(e => parseDate(e.date).getTime()).filter(t => t >= minD && t <= maxD).forEach(t => {
+          const x = toX(t);
+          ctx.strokeStyle = "#fbbf24"; ctx.lineWidth = 1; ctx.setLineDash([3, 3]);
+          ctx.beginPath(); ctx.moveTo(x, PAD.top); ctx.lineTo(x, H - PAD.bottom); ctx.stroke();
+          ctx.setLineDash([]);
+        });
+        (patient.refractions || []).map(e => parseDate(e.date).getTime()).filter(t => t >= minD && t <= maxD).forEach(t => {
+          const x = toX(t);
+          ctx.strokeStyle = "#a78bfa"; ctx.lineWidth = 1; ctx.setLineDash([2, 4]);
+          ctx.beginPath(); ctx.moveTo(x, PAD.top); ctx.lineTo(x, H - PAD.bottom); ctx.stroke();
+          ctx.setLineDash([]);
+        });
+        ctx.strokeStyle = "#0f4c75"; ctx.lineWidth = 2.5; ctx.beginPath();
+        als.forEach((m, i) => { const x = toX(parseDate(m.date).getTime()), y = toY(m.od); i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y); }); ctx.stroke();
+        als.forEach(m => { const x = toX(parseDate(m.date).getTime()), y = toY(m.od); ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.fillStyle = "#0f4c75"; ctx.fill(); ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5; ctx.stroke(); });
+        ctx.strokeStyle = "#3b82f6"; ctx.lineWidth = 2.5; ctx.beginPath();
+        als.forEach((m, i) => { const x = toX(parseDate(m.date).getTime()), y = toY(m.os); i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y); }); ctx.stroke();
+        als.forEach(m => { const x = toX(parseDate(m.date).getTime()), y = toY(m.os); ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.fillStyle = "#3b82f6"; ctx.fill(); ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5; ctx.stroke(); });
+        ctx.fillStyle = "#64748b"; ctx.font = "10px sans-serif"; ctx.textAlign = "center";
+        als.forEach(m => { ctx.fillText(m.date.slice(0, 7), toX(parseDate(m.date).getTime()), H - PAD.bottom + 16); });
+        const legY = H - 14;
+        [[PAD.left, "#0f4c75", "OD"], [PAD.left + 50, "#3b82f6", "OS"], [PAD.left + 100, "#fbbf24", "Tx Change"], [PAD.left + 185, "#a78bfa", "Rx visit"], [PAD.left + 250, "#22c55e", "Tx start"]].forEach(([x, col, label]) => {
+          ctx.fillStyle = col; ctx.fillRect(x, legY - 4, 14, 4);
+          ctx.fillStyle = "#374151"; ctx.font = "10px sans-serif"; ctx.textAlign = "left"; ctx.fillText(label, x + 18, legY);
+        });
+        const rxMap = {};
+        (patient.refractions || []).forEach(r => { rxMap[r.date] = r; });
+        pointsRef.current = als.map(m => ({ date: m.date, od: m.od, os: m.os, xOD: toX(parseDate(m.date).getTime()), yOD: toY(m.od), yOS: toY(m.os), rx: rxMap[m.date] || null }));
+      }, [patient]);
+      useEffect(() => { const t = setTimeout(() => drawGraph(), 60); return () => clearTimeout(t); }, [drawGraph]);
+      useEffect(() => { const onResize = () => drawGraph(); window.addEventListener("resize", onResize); return () => window.removeEventListener("resize", onResize); }, [drawGraph]);
+      const handleMouseMove = (e) => {
+        const canvas = canvasRef.current; if (!canvas) return;
+        const rect = canvas.getBoundingClientRect();
+        const mx = (e.clientX - rect.left) * (canvas.width / rect.width);
+        const my = (e.clientY - rect.top) * (canvas.height / rect.height);
+        let found = null;
+        for (const pt of pointsRef.current) {
+          if (Math.hypot(mx - pt.xOD, my - pt.yOD) < 12 || Math.hypot(mx - pt.xOD, my - pt.yOS) < 12) {
+            found = { date: pt.date, od: pt.od, os: pt.os, rx: pt.rx, x: e.clientX - rect.left, y: e.clientY - rect.top }; break;
+          }
+        }
+        setTooltip(found);
+      };
+      return (
+        <div style={{ position: "relative" }}>
+          <canvas ref={canvasRef} width={700} height={300}
+            style={{ width: "100%", height: "auto", borderRadius: 8, background: "#f8fafc", cursor: "crosshair", display: "block" }}
+            onMouseMove={handleMouseMove} onMouseLeave={() => setTooltip(null)} />
+          {tooltip && (
+            <div style={{ position: "absolute", left: tooltip.x + 12, top: tooltip.y - 10, background: "#1e293b", color: "#fff", borderRadius: 8, padding: "8px 12px", fontSize: 12, pointerEvents: "none", zIndex: 10, whiteSpace: "nowrap", boxShadow: "0 4px 12px rgba(0,0,0,0.3)" }}>
+              <div style={{ fontWeight: 700, marginBottom: 4 }}>{fmtDate(tooltip.date)}</div>
+              <div style={{ color: "#fca5a5" }}>OD: {tooltip.od} mm</div>
+              <div style={{ color: "#93c5fd" }}>OS: {tooltip.os} mm</div>
+              {tooltip.rx && (
+                <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid rgba(255,255,255,0.15)" }}>
+                  <div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 2 }}>Refraction</div>
+                  <div style={{ color: "#fca5a5" }}>OD {tooltip.rx.odSph >= 0 ? "+" : ""}{Number(tooltip.rx.odSph).toFixed(2)} {tooltip.rx.odCyl !== 0 ? `${tooltip.rx.odCyl >= 0 ? "+" : ""}${Number(tooltip.rx.odCyl).toFixed(2)} ×${tooltip.rx.odAxis}°` : "sph"}</div>
+                  <div style={{ color: "#93c5fd" }}>OS {tooltip.rx.osSph >= 0 ? "+" : ""}{Number(tooltip.rx.osSph).toFixed(2)} {tooltip.rx.osCyl !== 0 ? `${tooltip.rx.osCyl >= 0 ? "+" : ""}${Number(tooltip.rx.osCyl).toFixed(2)} ×${tooltip.rx.osAxis}°` : "sph"}</div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function NavBtn({ active, onClick, children }) {
+      return <button onClick={onClick} style={{ background: active ? "rgba(255,255,255,0.18)" : "transparent", color: "#fff", border: active ? "1px solid rgba(255,255,255,0.35)" : "1px solid transparent", borderRadius: 6, padding: "6px 14px", cursor: "pointer", fontSize: 13, fontWeight: active ? 600 : 400 }}>{children}</button>;
+    }
+
+    function StoryModal({ story, onClose, patientName }) {
+      return (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div style={{ background: "#fff", borderRadius: 14, maxWidth: 620, width: "100%", maxHeight: "85vh", overflow: "auto", padding: "28px", boxShadow: "0 8px 40px rgba(0,0,0,0.18)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <div style={{ fontWeight: 700, fontSize: 16, color: "#0f4c75" }}>✨ Clinical Summary — {patientName}</div>
+              <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", color: "#94a3b8" }}>✕</button>
+            </div>
+            <p style={{ fontSize: 13.5, lineHeight: 1.75, color: "#1e293b", marginBottom: 16 }}>{story.narrative}</p>
+            {story.tableRows && story.tableRows.length > 0 && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, color: "#0f4c75" }}>Growth Comparison</div>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                  <thead><tr style={{ background: "#f1f5f9" }}><th style={th}>Period</th><th style={th}>From Date</th><th style={th}>OD Δ (mm)</th><th style={th}>OS Δ (mm)</th></tr></thead>
+                  <tbody>
+                    {story.tableRows.map((row, i) => (
+                      <tr key={i}><td style={td}>{row.label}</td><td style={td}>{fmtDate(row.date)}</td>
+                        <td style={{ ...td, color: row.dOD > 0.1 ? "#dc2626" : "#16a34a", fontWeight: 600 }}>{sgnFmt(row.dOD)}</td>
+                        <td style={{ ...td, color: row.dOS > 0.1 ? "#dc2626" : "#16a34a", fontWeight: 600 }}>{sgnFmt(row.dOS)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {story.clinicalNotes && story.clinicalNotes.length > 0 && (
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6, color: "#0f4c75" }}>Clinical Events During Follow-up</div>
+                <ul style={{ margin: 0, paddingLeft: 18 }}>{story.clinicalNotes.map((n, i) => <li key={i} style={{ fontSize: 12, color: "#475569", marginBottom: 4 }}>{n}</li>)}</ul>
+              </div>
+            )}
+            <div style={{ background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 8, padding: "12px 14px", fontSize: 13, color: "#0c4a6e" }}>
+              <strong>Clinical Interpretation:</strong> {story.interpretation}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // Edit modal for clinical/admin events
+    function EditEventModal({ event, types, onSave, onDelete, onClose }) {
+      const [form, setForm] = useState({ ...event });
+      return (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div style={{ background: "#fff", borderRadius: 12, maxWidth: 420, width: "100%", padding: "22px 24px", boxShadow: "0 8px 40px rgba(0,0,0,0.18)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <div style={{ fontWeight: 700, fontSize: 15, color: "#0f4c75" }}>Edit Entry</div>
+              <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 18, cursor: "pointer", color: "#94a3b8" }}>✕</button>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <label style={{ fontSize: 11, color: "#64748b", display: "flex", flexDirection: "column", gap: 3 }}>
+                Date<input type="date" value={form.date} onChange={e => setForm(f => ({...f, date: e.target.value}))} style={inputStyle} />
+              </label>
+              <label style={{ fontSize: 11, color: "#64748b", display: "flex", flexDirection: "column", gap: 3 }}>
+                Type<select value={form.type} onChange={e => setForm(f => ({...f, type: e.target.value}))} style={inputStyle}>
+                  {types.map(t => <option key={t}>{t}</option>)}
+                </select>
+              </label>
+              <label style={{ fontSize: 11, color: "#64748b", display: "flex", flexDirection: "column", gap: 3 }}>
+                Notes<input value={form.notes || ""} onChange={e => setForm(f => ({...f, notes: e.target.value}))} style={inputStyle} />
+              </label>
+              {form.type === "Ortho-K Back-up Pair Ordered" && (
+                <label style={{ fontSize: 11, color: "#64748b", display: "flex", flexDirection: "column", gap: 3 }}>
+                  Cost ($)<input type="number" step="0.01" placeholder="0.00" value={form.cost || ""} onChange={e => setForm(f => ({...f, cost: e.target.value}))} style={inputStyle} />
+                </label>
+              )}
+              {form.type === "Ortho-K Back-up Pair Ordered" && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#64748b", cursor: "pointer" }}>
+                    <input type="checkbox" checked={!!form.warrantyVoided} onChange={e => setForm(f => ({ ...f, warrantyVoided: e.target.checked, voidDate: e.target.checked ? (f.voidDate || today()) : "" }))} />
+                    This order voids the active lens warranty
+                  </label>
+                  {form.warrantyVoided && (
+                    <label style={{ fontSize: 11, color: "#64748b", display: "flex", flexDirection: "column", gap: 3 }}>
+                      Void Date<input type="date" value={form.voidDate || today()} onChange={e => setForm(f => ({...f, voidDate: e.target.value}))} style={inputStyle} />
+                    </label>
+                  )}
+                </div>
+              )}
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+              <button onClick={() => onSave(form)} style={btnStyle("#0f4c75")}>Save</button>
+              <button onClick={onClose} style={btnStyle("#94a3b8")}>Cancel</button>
+              <button onClick={onDelete} style={{ ...btnStyle("#dc2626"), marginLeft: "auto" }}>Delete</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ── Home / Combined Search + Patients view ────────────────────────────────
+    function HomeView({ alerts, searchQ, setSearchQ, patients, onSelect, onDismissAlert, queueIds, onAddToQueue, onRemoveFromQueue, onClearQueue }) {
+      const [sortBy, setSortBy] = useState("activity");
+      const [filterTherapy, setFilterTherapy] = useState("");
+      const [filterLocation, setFilterLocation] = useState("");
+      const [filterStatus, setFilterStatus] = useState("Active");
+
+      const activePts = patients.filter(p => !p.archived);
+      const totalCount = activePts.length;
+
+      const queuePatients = queueIds.map(id => activePts.find(p => p.id === id)).filter(Boolean);
+
+      const filtered = activePts.filter(p => {
+        const q = searchQ.toLowerCase();
+        if (q && !p.name.toLowerCase().includes(q)) return false;
+        if (filterTherapy && p.therapy !== filterTherapy) return false;
+        if (filterLocation && p.location !== filterLocation) return false;
+        if (filterStatus && p.status !== filterStatus) return false;
+        return true;
+      });
+
+      const sorted = [...filtered].sort((a, b) => {
+        if (sortBy === "activity") return getLastActivityDate(b).localeCompare(getLastActivityDate(a));
+        if (sortBy === "name") return a.name.localeCompare(b.name);
+        if (sortBy === "txDate") return (getTherapyDate(b)||"").localeCompare(getTherapyDate(a)||"");
+        return 0;
+      });
+
+      const allLocations = [...new Set(activePts.map(p => p.location).filter(Boolean))].sort();
+
+      const rowStyle = (i) => ({
+        display: "grid", gridTemplateColumns: "minmax(0,1.2fr) minmax(0,1fr) minmax(0,1.4fr) 55px 1fr 75px 40px",
+        padding: "2px 10px", borderTop: "1px solid #f1f5f9", cursor: "pointer",
+        background: i % 2 === 0 ? "#fff" : "#f8fafc", alignItems: "center", gap: 5, minHeight: 26,
+      });
+
+      return (
+        <div style={{ maxWidth: 1400, margin: "0 auto", padding: "48px 24px" }}>
+
+          {/* Queue */}
+          {queuePatients.length > 0 && (
+            <div style={{ background: "#fff", borderRadius: 12, boxShadow: "0 2px 10px rgba(0,0,0,0.07)", padding: "14px 18px", marginBottom: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                <div style={{ fontWeight: 700, fontSize: 14, color: "#0f4c75" }}>
+                  📋 Today's Queue <span style={{ background: "#dbeafe", color: "#1d4ed8", borderRadius: 10, padding: "2px 8px", fontSize: 12, marginLeft: 6 }}>{queuePatients.length}</span>
+                </div>
+                <button onClick={onClearQueue} style={{ background: "none", border: "1px solid #e2e8f0", borderRadius: 6, padding: "3px 10px", cursor: "pointer", fontSize: 11, color: "#94a3b8" }}>Clear all</button>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                {queuePatients.map(p => (
+                  <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 10px", background: "#f0f9ff", borderRadius: 8, border: "1px solid #bae6fd" }}>
+                    <button onClick={() => onSelect(p.id)} style={{ background: "none", border: "none", cursor: "pointer", fontWeight: 700, fontSize: 14, color: "#0f4c75", padding: 0, flex: 1, textAlign: "left" }}>{displayName(p.name)}</button>
+                    <span style={{ fontSize: 11, color: "#64748b" }}>{p.location}</span>
+                    <TherapyBadge therapy={p.therapy} />
+                    <button onClick={() => onRemoveFromQueue(p.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#94a3b8", fontSize: 16, padding: 0, lineHeight: 1 }}>✕</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Alerts */}
+          {alerts.length > 0 && (
+            <div style={{ background: "#fff", borderRadius: 12, boxShadow: "0 2px 10px rgba(0,0,0,0.07)", padding: "14px 18px", marginBottom: 16 }}>
+              <div style={{ fontWeight: 700, fontSize: 13, color: "#b45309", marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
+                ⚠️ Needs Attention <span style={{ background: "#fef3c7", color: "#92400e", borderRadius: 12, padding: "2px 8px", fontSize: 12, fontWeight: 600 }}>{alerts.length}</span>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {alerts.map(a => (
+                  <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, background: a.severity === "high" ? "#fff1f2" : "#fffbeb", border: `1px solid ${a.severity === "high" ? "#fecaca" : "#fde68a"}`, borderRadius: 8, padding: "8px 12px" }}>
+                    <span style={{ fontSize: 14 }}>{a.type === "warranty" ? "🛡" : "📈"}</span>
+                    <button onClick={() => onSelect(a.patientId)} style={{ background: "none", border: "none", cursor: "pointer", color: "#1d4ed8", fontWeight: 600, fontSize: 13, padding: 0 }}>{displayName(a.patientName)}</button>
+                    <span style={{ fontSize: 12, color: "#64748b", flex: 1 }}>{a.label}</span>
+                    <button onClick={() => onDismissAlert(a.id, a.patientId)} style={{ background: "none", border: "none", cursor: "pointer", color: "#94a3b8", fontSize: 16, padding: 0 }}>✕</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Patient list */}
+          <div style={{ background: "#fff", borderRadius: 12, boxShadow: "0 2px 10px rgba(0,0,0,0.07)", overflow: "hidden" }}>
+            {/* Toolbar */}
+            <div style={{ padding: "8px 12px", borderBottom: "1px solid #f1f5f9", display: "flex", gap: 8, alignItems: "center", width: "100%" }}>
+              <input value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Search by name…"
+                style={{ width: 200, padding: "5px 10px", border: "1px solid #e2e8f0", borderRadius: 6, fontSize: 13, fontFamily: "'DM Sans', sans-serif", flexShrink: 0 }} />
+              <span style={{ fontSize: 12, color: "#94a3b8", whiteSpace: "nowrap" }}>{totalCount} patients</span>
+              <div style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
+                <span style={{ fontSize: 11, color: "#94a3b8", whiteSpace: "nowrap" }}>Filter:</span>
+                <select value={filterTherapy} onChange={e => setFilterTherapy(e.target.value)} style={{ padding: "5px 7px", border: "1px solid #e2e8f0", borderRadius: 6, fontSize: 12 }}>
+                  <option value="">All Therapies</option>
+                  {THERAPIES.map(t => <option key={t}>{t}</option>)}
+                </select>
+                <select value={filterLocation} onChange={e => setFilterLocation(e.target.value)} style={{ padding: "5px 7px", border: "1px solid #e2e8f0", borderRadius: 6, fontSize: 12 }}>
+                  <option value="">All Locations</option>
+                  {allLocations.map(l => <option key={l}>{l}</option>)}
+                </select>
+                <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={{ padding: "5px 7px", border: "1px solid #e2e8f0", borderRadius: 6, fontSize: 12 }}>
+                  <option value="">All Statuses</option>
+                  {STATUSES.map(s => <option key={s}>{s}</option>)}
+                </select>
+                <select value={sortBy} onChange={e => setSortBy(e.target.value)} style={{ padding: "5px 7px", border: "1px solid #0f4c75", borderRadius: 6, fontSize: 12, background: "#f0f9ff", color: "#0f4c75", fontWeight: 600 }}>
+                  <option value="activity">Sort: Recent Activity</option>
+                  <option value="txDate">Sort: Tx Date</option>
+                  <option value="name">Sort: Name A–Z</option>
+                </select>
+              </div>
+            </div>
+            {/* Header */}
+            <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1.2fr) minmax(0,1fr) minmax(0,1.4fr) 55px 1fr 75px 40px", padding: "4px 10px", background: "#f1f5f9", fontSize: 10, fontWeight: 700, color: "#64748b", letterSpacing: 0.5, textTransform: "uppercase", gap: 5 }}>
+              <span>Patient</span><span>Location</span><span>Therapy</span><span>Status</span><span>Doctor</span><span>Last Visit</span><span>Queue</span>
+            </div>
+            {sorted.slice(0, 60).map((p, i) => {
+              const inQueue = queueIds.includes(p.id);
+              return (
+                <div key={p.id} style={rowStyle(i)}
+                  onMouseEnter={e => e.currentTarget.style.background = "#eff6ff"}
+                  onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? "#fff" : "#f8fafc"}>
+                  <span onClick={() => onSelect(p.id)} style={{ fontWeight: 600, fontSize: 13, cursor: "pointer", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayName(p.name)}</span>
+                  <span style={{ fontSize: 12, color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.location}</span>
+                  <span style={{ display: "flex", gap: 3, flexWrap: "nowrap", overflow: "hidden" }}>
+                    <TherapyBadge therapy={p.therapy} />
+                    {p.combinationTherapy && <TherapyBadge therapy={p.combinationTherapy} />}
+                  </span>
+                  <span style={{ fontSize: 11, color: p.status === "Active" ? "#16a34a" : "#94a3b8", whiteSpace: "nowrap" }}>{p.status}</span>
+                  <span style={{ fontSize: 11, color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.managingDoctor || p.initiatingDoctor}</span>
+                  <span style={{ fontSize: 11, color: "#64748b", whiteSpace: "nowrap" }}>{fmtDate(getLastActivityDate(p)) || "—"}</span>
+                  <button onClick={() => inQueue ? onRemoveFromQueue(p.id) : onAddToQueue(p.id)}
+                    style={{ background: inQueue ? "#dbeafe" : "#f1f5f9", color: inQueue ? "#1d4ed8" : "#94a3b8", border: "none", borderRadius: 5, padding: "3px 6px", cursor: "pointer", fontSize: 12, fontWeight: inQueue ? 700 : 400 }}>
+                    {inQueue ? "✓" : "+"}
+                  </button>
+                </div>
+              );
+            })}
+            {sorted.length === 0 && <div style={{ padding: 20, textAlign: "center", color: "#94a3b8", fontSize: 13 }}>No patients match your filters.</div>}
+            {sorted.length > 60 && <div style={{ padding: "8px 12px", textAlign: "center", color: "#94a3b8", fontSize: 12 }}>Showing 60 of {sorted.length} — use search to narrow</div>}
+          </div>
+        </div>
+      );
+    }
+
+    // ── Today quick-add panel ──────────────────────────────────────────────────
+    function TodayPanel({ patient, onUpdate, clinicalTypes, adminTypes, onClose }) {
+      const emptyAL   = () => ({ date: today(), od: "", os: "", notes: "" });
+      const emptyRx   = () => ({ date: today(), odSph: "", odCyl: "", odAxis: "", odVA: "20/20", osSph: "", osCyl: "", osAxis: "", osVA: "20/20" });
+      const emptyClin = () => ({ date: today(), type: (clinicalTypes||DEFAULT_CLINICAL_TYPES)[0], notes: "" });
+      const emptyAdm  = () => ({ date: today(), type: (adminTypes||DEFAULT_ADMIN_TYPES)[0], notes: "" });
+
+      const [alForm, setAlForm] = useState(emptyAL());
+      const [rxForm, setRxForm] = useState(emptyRx());
+      const [clinForm, setClinForm] = useState(emptyClin());
+      const [admForm, setAdmForm] = useState(emptyAdm());
+      const [flash, setFlash] = useState({});
+      const doFlash = k => { setFlash(f => ({...f, [k]: true})); setTimeout(() => setFlash(f => ({...f, [k]: false})), 1800); };
+
+      const [alSaved, setAlSaved] = useState(false);
+      const [rxSaved, setRxSaved] = useState(false);
+      const [clinSaved, setClinSaved] = useState(false);
+      const [admSaved, setAdmSaved] = useState(false);
+
+      // track pending (unsaved) state for save-all
+      const pendingRef = useRef({ al: false, rx: false, clin: false, adm: false });
+
+      const saveAL = (p) => {
+        const pt = p || patient;
+        if (!alForm.date || !alForm.od || !alForm.os) return pt;
+        const updated = { ...pt, alMeasurements: [...(pt.alMeasurements||[]), { id: uid(), ...alForm, od: parseFloat(alForm.od), os: parseFloat(alForm.os) }] };
+        onUpdate(updated); setAlForm(emptyAL()); doFlash("al"); setAlSaved(true);
+        pendingRef.current.al = false;
+        return updated;
+      };
+      const saveRx = (p) => {
+        const pt = p || patient;
+        if (!rxForm.date || !rxForm.odSph || !rxForm.osSph) return pt;
+        const updated = { ...pt, refractions: [...(pt.refractions||[]), { id: uid(), ...rxForm, odSph: parseFloat(rxForm.odSph), odCyl: parseFloat(rxForm.odCyl||0), odAxis: parseInt(rxForm.odAxis||0), osSph: parseFloat(rxForm.osSph), osCyl: parseFloat(rxForm.osCyl||0), osAxis: parseInt(rxForm.osAxis||0) }] };
+        onUpdate(updated); setRxForm(emptyRx()); doFlash("rx"); setRxSaved(true);
+        pendingRef.current.rx = false;
+        return updated;
+      };
+      const saveClin = (p) => {
+        const pt = p || patient;
+        if (!clinForm.date || !clinForm.type) return pt;
+        const updated = { ...pt, clinicalEvents: [...(pt.clinicalEvents||[]), { id: uid(), ...clinForm }] };
+        onUpdate(updated); setClinForm(emptyClin()); doFlash("clin"); setClinSaved(true);
+        pendingRef.current.clin = false;
+        return updated;
+      };
+      const saveAdm = (p) => {
+        const pt = p || patient;
+        if (!admForm.date || !admForm.type) return pt;
+        const updated = { ...pt, adminEvents: [...(pt.adminEvents||[]), { id: uid(), ...admForm }] };
+        onUpdate(updated); setAdmForm(emptyAdm()); doFlash("adm"); setAdmSaved(true);
+        pendingRef.current.adm = false;
+        return updated;
+      };
+      const saveAll = () => {
+        // chain saves so each builds on the last
+        let p = patient;
+        if (alForm.od && alForm.os) p = saveAL(p);
+        if (rxForm.odSph && rxForm.osSph) p = saveRx(p);
+        if (clinForm.notes || clinForm.type) p = saveClin(p);
+        if (admForm.notes || admForm.type) p = saveAdm(p);
+      };
+
+      const rowStyle = { display: "flex", gap: 6, alignItems: "center", flexWrap: "nowrap" };
+      const smallInput = (extra) => ({ ...inputStyle, ...extra });
+      const savedDot = (k) => flash[k] ? <span style={{ color: "#16a34a", fontSize: 11, fontWeight: 700, flexShrink: 0 }}>✓</span> : null;
+      const sectionHdr = (color, label) => <div style={{ fontSize: 10, fontWeight: 700, color, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4, marginTop: 8 }}>{label}</div>;
+
+      return (
+        <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: "12px 14px", marginBottom: 12 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+            <div style={{ fontWeight: 700, fontSize: 13, color: "#0f4c75" }}>Today — Quick Add</div>
+            <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#94a3b8", fontSize: 16 }}>✕</button>
+          </div>
+
+          {/* Clinical */}
+          {sectionHdr("#1d4ed8", "🩺 Clinical Note")}
+          <div style={rowStyle}>
+            <input type="date" value={clinForm.date} onChange={e=>setClinForm(f=>({...f,date:e.target.value}))} style={smallInput({width:120})} />
+            <select value={clinForm.type} onChange={e=>setClinForm(f=>({...f,type:e.target.value}))} style={smallInput({flex:"0 0 160px"})}>
+              {(clinicalTypes||DEFAULT_CLINICAL_TYPES).map(t=><option key={t}>{t}</option>)}
+            </select>
+            <input placeholder="Notes" value={clinForm.notes} onChange={e=>setClinForm(f=>({...f,notes:e.target.value}))} style={smallInput({flex:1,minWidth:60})} />
+            <button onClick={() => saveClin()} style={btnStyle("#94a3b8",true)}>Save</button>
+            {savedDot("clin")}
+          </div>
+
+          {/* Admin */}
+          {sectionHdr("#475569", "📋 Admin Note")}
+          <div style={rowStyle}>
+            <input type="date" value={admForm.date} onChange={e=>setAdmForm(f=>({...f,date:e.target.value}))} style={smallInput({width:120})} />
+            <select value={admForm.type} onChange={e=>setAdmForm(f=>({...f,type:e.target.value}))} style={smallInput({flex:"0 0 160px"})}>
+              {(adminTypes||DEFAULT_ADMIN_TYPES).map(t=><option key={t}>{t}</option>)}
+            </select>
+            <input placeholder="Notes" value={admForm.notes} onChange={e=>setAdmForm(f=>({...f,notes:e.target.value}))} style={smallInput({flex:1,minWidth:60})} />
+            <button onClick={() => saveAdm()} style={btnStyle("#94a3b8",true)}>Save</button>
+            {savedDot("adm")}
+          </div>
+          {admForm.type === "Ortho-K Back-up Pair Ordered" && (
+            <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 5, paddingLeft: 4, flexWrap: "wrap" }}>
+              <label style={{ fontSize: 11, color: "#64748b", display: "flex", flexDirection: "column", gap: 2 }}>
+                Cost ($)<input type="number" step="0.01" placeholder="0.00" value={admForm.cost||""} onChange={e=>setAdmForm(f=>({...f,cost:e.target.value}))} style={smallInput({width:90})} />
+              </label>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#64748b", cursor: "pointer", marginTop: 14 }}>
+                <input type="checkbox" checked={!!admForm.warrantyVoided} onChange={e=>setAdmForm(f=>({...f, warrantyVoided: e.target.checked, voidDate: e.target.checked?(f.voidDate||today()):""}))} />
+                This order voids the active lens warranty
+              </label>
+              {admForm.warrantyVoided && (
+                <label style={{ fontSize: 11, color: "#64748b", display: "flex", flexDirection: "column", gap: 2, marginTop: 0 }}>
+                  Void Date<input type="date" value={admForm.voidDate||today()} onChange={e=>setAdmForm(f=>({...f,voidDate:e.target.value}))} style={smallInput({width:130})} />
+                </label>
+              )}
+            </div>
+          )}
+
+          {/* AL */}
+          {sectionHdr("#0f4c75", "📏 Axial Length")}
+          <div style={rowStyle}>
+            <input type="date" value={alForm.date} onChange={e => setAlForm(f=>({...f,date:e.target.value}))} style={smallInput({width:120})} />
+            <input type="number" step="0.01" placeholder="OD" value={alForm.od} onChange={e => setAlForm(f=>({...f,od:e.target.value}))} style={smallInput({width:70})} />
+            <input type="number" step="0.01" placeholder="OS" value={alForm.os} onChange={e => setAlForm(f=>({...f,os:e.target.value}))} style={smallInput({width:70})} />
+            <input placeholder="Notes" value={alForm.notes} onChange={e => setAlForm(f=>({...f,notes:e.target.value}))} style={smallInput({flex:1,minWidth:60})} />
+            <button onClick={() => saveAL()} style={btnStyle("#94a3b8",true)}>Save</button>
+            {savedDot("al")}
+          </div>
+
+          {/* Refraction */}
+          {sectionHdr("#0e7490", "🔍 Refraction")}
+          <div style={{ fontSize: 11, color: "#64748b", marginBottom: 3 }}>
+            <input type="date" value={rxForm.date} onChange={e => setRxForm(f=>({...f,date:e.target.value}))} style={smallInput({width:120,marginBottom:4})} />
+          </div>
+          {/* OD row */}
+          <div style={{...rowStyle, marginBottom: 3}}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: "#0f4c75", width: 22, flexShrink: 0 }}>OD</span>
+            <input type="number" step="0.25" placeholder="Sph" value={rxForm.odSph} onChange={e=>setRxForm(f=>({...f,odSph:e.target.value}))} style={smallInput({width:64})} />
+            <input type="number" step="0.25" placeholder="Cyl" value={rxForm.odCyl} onChange={e=>setRxForm(f=>({...f,odCyl:e.target.value}))} style={smallInput({width:64})} />
+            <input type="number" step="1" placeholder="Axis" value={rxForm.odAxis} onChange={e=>setRxForm(f=>({...f,odAxis:e.target.value}))} style={smallInput({width:55})} />
+            <input placeholder="VA" value={rxForm.odVA} onChange={e=>setRxForm(f=>({...f,odVA:e.target.value}))} style={smallInput({width:60})} />
+          </div>
+          {/* OS row */}
+          <div style={rowStyle}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: "#3b82f6", width: 22, flexShrink: 0 }}>OS</span>
+            <input type="number" step="0.25" placeholder="Sph" value={rxForm.osSph} onChange={e=>setRxForm(f=>({...f,osSph:e.target.value}))} style={smallInput({width:64})} />
+            <input type="number" step="0.25" placeholder="Cyl" value={rxForm.osCyl} onChange={e=>setRxForm(f=>({...f,osCyl:e.target.value}))} style={smallInput({width:64})} />
+            <input type="number" step="1" placeholder="Axis" value={rxForm.osAxis} onChange={e=>setRxForm(f=>({...f,osAxis:e.target.value}))} style={smallInput({width:55})} />
+            <input placeholder="VA" value={rxForm.osVA} onChange={e=>setRxForm(f=>({...f,osVA:e.target.value}))} style={smallInput({width:60})} />
+            <button onClick={() => saveRx()} style={btnStyle("#94a3b8",true)}>Save</button>
+            {savedDot("rx")}
+          </div>
+
+          <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #e2e8f0" }}>
+            <button onClick={saveAll} style={btnStyle("#0f4c75")}>💾 Save All</button>
+            <span style={{ fontSize: 11, color: "#94a3b8", marginLeft: 10 }}>Saves any fields that have data entered</span>
+          </div>
+        </div>
+      );
+    }
+
+    // ── Combined Overview + Timeline Tab ──────────────────────────────────────
+    function OverviewTimelineTab({ patient, onUpdate, pushUndo, undoStack, setUndoStack, clinicalTypes, adminTypes }) {
+      const [showToday, setShowToday] = useState(false);
+      const [showAddAL, setShowAddAL] = useState(false);
+      const [showAddRx, setShowAddRx] = useState(false);
+      const [showAddClin, setShowAddClin] = useState(false);
+      const [showAddAdm, setShowAddAdm] = useState(false);
+      const [showStory, setShowStory] = useState(false);
+      const [storyData, setStoryData] = useState(null);
+      const [showSummary, setShowSummary] = useState(false);
+      const [editEvent, setEditEvent] = useState(null); // {event, kind: "clin"|"adm"}
+
+      const [cols, setCols] = useState(() => ({
+        al: true, rx: true, clinical: true, admin: true, lens: usesLens(patient),
+      }));
+
+      const [alForm, setAlForm] = useState({ date: today(), od: "", os: "", notes: "" });
+      const [rxForm, setRxForm] = useState({ date: today(), odSph: "", odCyl: "", odAxis: "", odVA: "20/20", osSph: "", osCyl: "", osAxis: "", osVA: "20/20" });
+      const [clinForm, setClinForm] = useState({ date: today(), type: (clinicalTypes||DEFAULT_CLINICAL_TYPES)[0], notes: "" });
+      const [admForm, setAdmForm] = useState({ date: today(), type: (adminTypes||DEFAULT_ADMIN_TYPES)[0], notes: "", cost: "", warrantyVoided: false, voidDate: "" });
+      const [flash, setFlash] = useState({});
+      const doFlash = k => { setFlash(f => ({...f, [k]: true})); setTimeout(() => setFlash(f => ({...f, [k]: false})), 1800); };
+
+      const als = [...(patient.alMeasurements || [])].sort((a, b) => b.date.localeCompare(a.date));
+      const alsAsc = [...(patient.alMeasurements || [])].sort((a, b) => a.date.localeCompare(b.date));
+      const rxs = [...(patient.refractions || [])].sort((a, b) => b.date.localeCompare(a.date));
+
+      const deltaMap = {};
+      alsAsc.forEach((m, i) => {
+        if (i === 0) { deltaMap[m.id] = { deltaOD: null, deltaOS: null, deltaTime: null }; return; }
+        const prev = alsAsc[i - 1];
+        deltaMap[m.id] = { deltaOD: parseFloat(m.od) - parseFloat(prev.od), deltaOS: parseFloat(m.os) - parseFloat(prev.os), deltaTime: durationLabel(parseDate(prev.date), parseDate(m.date)) };
+      });
+
+      const allDates = [...new Set([
+        ...als.map(m => m.date),
+        ...rxs.map(r => r.date),
+        ...(patient.clinicalEvents||[]).map(e => e.date),
+        ...(patient.adminEvents||[]).map(e => e.date),
+        ...(patient.lensHistory||[]).map(l => l.date),
+      ])].sort((a, b) => b.localeCompare(a));
+
+      const addAL = () => {
+        if (!alForm.date || !alForm.od || !alForm.os) return;
+        onUpdate({ ...patient, alMeasurements: [...(patient.alMeasurements||[]), { id: uid(), ...alForm, od: parseFloat(alForm.od), os: parseFloat(alForm.os) }] });
+        setAlForm({ date: today(), od: "", os: "", notes: "" }); setShowAddAL(false); doFlash("al");
+      };
+      const addRx = () => {
+        if (!rxForm.date || !rxForm.odSph || !rxForm.osSph) return;
+        onUpdate({ ...patient, refractions: [...(patient.refractions||[]), { id: uid(), ...rxForm, odSph: parseFloat(rxForm.odSph), odCyl: parseFloat(rxForm.odCyl||0), odAxis: parseInt(rxForm.odAxis||0), osSph: parseFloat(rxForm.osSph), osCyl: parseFloat(rxForm.osCyl||0), osAxis: parseInt(rxForm.osAxis||0) }] });
+        setRxForm({ date: today(), odSph: "", odCyl: "", odAxis: "", odVA: "20/20", osSph: "", osCyl: "", osAxis: "", osVA: "20/20" }); setShowAddRx(false); doFlash("rx");
+      };
+      const addClin = () => {
+        if (!clinForm.date || !clinForm.type) return;
+        onUpdate({ ...patient, clinicalEvents: [...(patient.clinicalEvents||[]), { id: uid(), ...clinForm }] });
+        setClinForm({ date: today(), type: (clinicalTypes||DEFAULT_CLINICAL_TYPES)[0], notes: "" }); setShowAddClin(false); doFlash("clin");
+      };
+      const addAdm = () => {
+        if (!admForm.date || !admForm.type) return;
+        onUpdate({ ...patient, adminEvents: [...(patient.adminEvents||[]), { id: uid(), ...admForm }] });
+        setAdmForm({ date: today(), type: (adminTypes||DEFAULT_ADMIN_TYPES)[0], notes: "", cost: "", warrantyVoided: false, voidDate: "" }); setShowAddAdm(false); doFlash("adm");
+      };
+      const removeAL = (id) => { pushUndo({ type: "restoreAL", patientId: patient.id, item: patient.alMeasurements.find(x => x.id === id) }); onUpdate({ ...patient, alMeasurements: patient.alMeasurements.filter(x => x.id !== id) }); };
+      const removeRx = (id) => { pushUndo({ type: "restoreRx", patientId: patient.id, item: patient.refractions.find(x => x.id === id) }); onUpdate({ ...patient, refractions: patient.refractions.filter(x => x.id !== id) }); };
+      const handleUndo = () => {
+        if (!undoStack.length) return;
+        const last = undoStack[undoStack.length - 1];
+        if (last.type === "restoreAL" && last.patientId === patient.id) onUpdate({ ...patient, alMeasurements: [...(patient.alMeasurements||[]), last.item] });
+        else if (last.type === "restoreRx" && last.patientId === patient.id) onUpdate({ ...patient, refractions: [...(patient.refractions||[]), last.item] });
+        setUndoStack(s => s.slice(0, -1));
+      };
+
+      const saveEditedClin = (updated) => {
+        onUpdate({ ...patient, clinicalEvents: patient.clinicalEvents.map(e => e.id === updated.id ? updated : e) });
+        setEditEvent(null);
+      };
+      const saveEditedAdm = (updated) => {
+        onUpdate({ ...patient, adminEvents: patient.adminEvents.map(e => e.id === updated.id ? updated : e) });
+        setEditEvent(null);
+      };
+      const deleteClin = (id) => { onUpdate({ ...patient, clinicalEvents: patient.clinicalEvents.filter(e => e.id !== id) }); setEditEvent(null); };
+      const deleteAdm = (id) => { onUpdate({ ...patient, adminEvents: patient.adminEvents.filter(e => e.id !== id) }); setEditEvent(null); };
+
+      const printTable = () => {
+        const sortedDates = [...allDates].sort((a,b) => a.localeCompare(b));
+        const rows = sortedDates.map(date => {
+          const al = patient.alMeasurements?.find(m => m.date === date);
+          const rx = patient.refractions?.find(r => r.date === date);
+          return `<tr><td>${fmtDate(date)}</td><td>${al ? al.od : '–'}</td><td>${al ? al.os : '–'}</td><td>${rx ? `${rx.odSph >= 0 ? '+' : ''}${rx.odSph} ${rx.odCyl ? rx.odCyl + ' ×' + rx.odAxis : 'sph'}` : '–'}</td><td>${rx ? `${rx.osSph >= 0 ? '+' : ''}${rx.osSph} ${rx.osCyl ? rx.osCyl + ' ×' + rx.osAxis : 'sph'}` : '–'}</td><td>${al?.notes || ''}</td></tr>`;
+        }).join('');
+        const w = window.open('', '_blank');
+        w.document.write(`<html><head><title>${displayName(patient.name)} — Timeline</title><style>body{font-family:Arial,sans-serif;padding:20px;font-size:12px}table{border-collapse:collapse;width:100%}th{background:#0f4c75;color:#fff;padding:6px 8px}td{border:1px solid #e2e8f0;padding:5px 8px}</style></head><body><h2>${displayName(patient.name)} — Timeline</h2><table><thead><tr><th>Date</th><th>OD AL</th><th>OS AL</th><th>OD Rx</th><th>OS Rx</th><th>Notes</th></tr></thead><tbody>${rows}</tbody></table><script>window.print();<\/script></body></html>`);
+        w.document.close();
+      };
+
+      function fmtRxCell(sph, cyl, axis) {
+        const s = `${sph >= 0 ? "+" : ""}${Number(sph).toFixed(2)}`;
+        if (!cyl || cyl === 0) return s + " sph";
+        return `${s} ${cyl >= 0 ? "+" : ""}${Number(cyl).toFixed(2)} ×${axis}°`;
+      }
+
+      const COL_DEFS = [
+        { key: "al", label: "AL" },
+        { key: "rx", label: "Rx" },
+        { key: "clinical", label: "Clinical" },
+        { key: "admin", label: "Admin" },
+        { key: "lens", label: "Lens" },
+      ];
+
+      const activeCols = COL_DEFS.filter(c => cols[c.key]);
+
+      const formCard = { background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 8, padding: "10px 12px", marginBottom: 10 };
+
+      const story = als.length >= 2 ? generateStory(patient) : null;
+
+      return (
+        <div>
+          {/* Clinical Summary dropdown */}
+          <div style={{ marginBottom: 10 }}>
+            <button onClick={() => setShowSummary(v => !v)}
+              style={{ background: "none", border: "1px solid #bae6fd", borderRadius: 6, padding: "5px 12px", cursor: "pointer", fontSize: 12, color: "#0369a1", fontWeight: 600, display: "flex", alignItems: "center", gap: 5 }}>
+              ✨ Clinical Summary {showSummary ? "▲" : "▼"}
+            </button>
+            {showSummary && story && (
+              <div style={{ background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 10, padding: "14px 16px", marginTop: 8 }}>
+                <p style={{ fontSize: 13, color: "#0c4a6e", lineHeight: 1.7, margin: 0, marginBottom: 10 }}>{story.narrative}</p>
+                {story.tableRows && story.tableRows.length > 0 && (
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, marginBottom: 10 }}>
+                    <thead><tr style={{ background: "#e0f2fe" }}>
+                      <th style={th}>Period</th><th style={th}>From Date</th><th style={th}>OD Δ</th><th style={th}>OS Δ</th>
+                    </tr></thead>
+                    <tbody>{story.tableRows.map((row, i) => (
+                      <tr key={i}><td style={td}>{row.label}</td><td style={td}>{fmtDate(row.date)}</td>
+                        <td style={{ ...td, color: row.dOD > 0.1 ? "#dc2626" : "#16a34a", fontWeight: 600 }}>{sgnFmt(row.dOD)}</td>
+                        <td style={{ ...td, color: row.dOS > 0.1 ? "#dc2626" : "#16a34a", fontWeight: 600 }}>{sgnFmt(row.dOS)}</td>
+                      </tr>
+                    ))}</tbody>
+                  </table>
+                )}
+                <div style={{ background: "#fff", border: "1px solid #bae6fd", borderRadius: 8, padding: "10px 12px", fontSize: 13, color: "#0c4a6e" }}>
+                  <strong>Clinical Interpretation:</strong> {story.interpretation}
+                </div>
+              </div>
+            )}
+            {showSummary && !story && <div style={{ fontSize: 12, color: "#94a3b8", padding: "8px 0" }}>Not enough AL data to generate summary.</div>}
+          </div>
+
+          {/* Toolbar */}
+          <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap", alignItems: "center" }}>
+            <button onClick={() => setShowToday(v => !v)} style={{ ...btnStyle("#0f4c75"), background: showToday ? "#0a3558" : "#0f4c75" }}>📋 Today</button>
+            <button onClick={() => setShowAddAL(v => !v)} style={btnStyle("#1d4ed8")}>+ AL</button>
+            <button onClick={() => setShowAddRx(v => !v)} style={btnStyle("#0891b2")}>+ Rx</button>
+            <button onClick={() => setShowAddClin(v => !v)} style={btnStyle("#3730a3")}>+ Clinical</button>
+            <button onClick={() => setShowAddAdm(v => !v)} style={btnStyle("#64748b")}>+ Admin</button>
+            <button onClick={printTable} style={btnStyle("#475569")}>🖨 Print Table</button>
+            {undoStack.some(u => u.patientId === patient.id) && <button onClick={handleUndo} style={btnStyle("#dc2626")}>↩ Undo</button>}
+            {/* Column filters */}
+            <div style={{ marginLeft: 6, display: "flex", gap: 4, alignItems: "center" }}>
+              <span style={{ fontSize: 10, color: "#94a3b8", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.4 }}>Filters:</span>
+              {COL_DEFS.map(({ key, label }) => (
+                <button key={key} onClick={() => setCols(c => ({ ...c, [key]: !c[key] }))}
+                  style={{ background: cols[key] ? "#e2e8f0" : "#f8fafc", color: cols[key] ? "#475569" : "#cbd5e1", border: `1px solid ${cols[key] ? "#cbd5e1" : "#e2e8f0"}`, borderRadius: 20, padding: "3px 10px", cursor: "pointer", fontSize: 11, fontWeight: cols[key] ? 600 : 400 }}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Today panel */}
+          {showToday && <TodayPanel patient={patient} onUpdate={onUpdate} clinicalTypes={clinicalTypes} adminTypes={adminTypes} onClose={() => setShowToday(false)} />}
+
+          {/* Individual add forms */}
+          {showAddAL && (
+            <div style={formCard}>
+              <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 8, color: "#0f4c75" }}>New AL Measurement</div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+                {[["date","Date","date"],["od","OD (mm)","number"],["os","OS (mm)","number"]].map(([k,l,t]) => (
+                  <label key={k} style={labelStyle}>{l}<input type={t} step={t==="number"?"0.01":undefined} value={alForm[k]} onChange={e => setAlForm(f => ({ ...f, [k]: e.target.value }))} style={inputStyle} /></label>
+                ))}
+                <label style={{ ...labelStyle, flex: "1 1 150px" }}>Notes<input value={alForm.notes} onChange={e => setAlForm(f => ({ ...f, notes: e.target.value }))} style={inputStyle} /></label>
+                <button onClick={addAL} style={btnStyle("#0f4c75")}>Save</button>
+                <button onClick={() => setShowAddAL(false)} style={btnStyle("#94a3b8")}>Cancel</button>
+              </div>
+            </div>
+          )}
+          {showAddRx && (
+            <div style={formCard}>
+              <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 8, color: "#0891b2" }}>New Refraction</div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "flex-end" }}>
+                <label style={labelStyle}>Date<input type="date" value={rxForm.date} onChange={e => setRxForm(f => ({ ...f, date: e.target.value }))} style={inputStyle} /></label>
+                {[["odSph","OD Sph"],["odCyl","OD Cyl"],["odAxis","OD Axis"],["osSph","OS Sph"],["osCyl","OS Cyl"],["osAxis","OS Axis"]].map(([k,l]) => (
+                  <label key={k} style={{ ...labelStyle, flex: "0 0 72px" }}>{l}<input value={rxForm[k]} onChange={e => setRxForm(f => ({ ...f, [k]: e.target.value }))} style={inputStyle} /></label>
+                ))}
+                <button onClick={addRx} style={btnStyle("#0891b2")}>Save</button>
+                <button onClick={() => setShowAddRx(false)} style={btnStyle("#94a3b8")}>Cancel</button>
+              </div>
+            </div>
+          )}
+          {showAddClin && (
+            <div style={formCard}>
+              <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 8, color: "#3730a3" }}>New Clinical Note</div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+                <label style={labelStyle}>Date<input type="date" value={clinForm.date} onChange={e=>setClinForm(f=>({...f,date:e.target.value}))} style={inputStyle} /></label>
+                <label style={{...labelStyle,flex:"1 1 160px"}}>Type<select value={clinForm.type} onChange={e=>setClinForm(f=>({...f,type:e.target.value}))} style={inputStyle}>{(clinicalTypes||DEFAULT_CLINICAL_TYPES).map(t=><option key={t}>{t}</option>)}</select></label>
+                <label style={{...labelStyle,flex:"2 1 180px"}}>Notes<input value={clinForm.notes} onChange={e=>setClinForm(f=>({...f,notes:e.target.value}))} style={inputStyle} /></label>
+                <button onClick={addClin} style={btnStyle("#3730a3")}>Save</button>
+                <button onClick={() => setShowAddClin(false)} style={btnStyle("#94a3b8")}>Cancel</button>
+              </div>
+            </div>
+          )}
+          {showAddAdm && (
+            <div style={formCard}>
+              <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 8, color: "#64748b" }}>New Admin Note</div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+                <label style={labelStyle}>Date<input type="date" value={admForm.date} onChange={e=>setAdmForm(f=>({...f,date:e.target.value}))} style={inputStyle} /></label>
+                <label style={{...labelStyle,flex:"1 1 160px"}}>Type<select value={admForm.type} onChange={e=>setAdmForm(f=>({...f,type:e.target.value}))} style={inputStyle}>{(adminTypes||DEFAULT_ADMIN_TYPES).map(t=><option key={t}>{t}</option>)}</select></label>
+                <label style={{...labelStyle,flex:"2 1 180px"}}>Notes<input value={admForm.notes} onChange={e=>setAdmForm(f=>({...f,notes:e.target.value}))} style={inputStyle} /></label>
+                <button onClick={addAdm} style={btnStyle("#64748b")}>Save</button>
+                <button onClick={() => setShowAddAdm(false)} style={btnStyle("#94a3b8")}>Cancel</button>
+              </div>
+              {admForm.type === "Ortho-K Back-up Pair Ordered" && (
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginTop: 6, paddingLeft: 2 }}>
+                  <label style={{...labelStyle,flex:"0 0 90px"}}>Cost ($)<input type="number" step="0.01" placeholder="0.00" value={admForm.cost||""} onChange={e=>setAdmForm(f=>({...f,cost:e.target.value}))} style={inputStyle} /></label>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#64748b", cursor: "pointer", paddingBottom: 4 }}>
+                    <input type="checkbox" checked={!!admForm.warrantyVoided} onChange={e=>setAdmForm(f=>({...f, warrantyVoided: e.target.checked, voidDate: e.target.checked?(f.voidDate||today()):""}))} />
+                    This order voids the active lens warranty
+                  </label>
+                  {admForm.warrantyVoided && (
+                    <label style={{...labelStyle, flex:"0 0 130px"}}>Void Date<input type="date" value={admForm.voidDate||today()} onChange={e=>setAdmForm(f=>({...f,voidDate:e.target.value}))} style={inputStyle} /></label>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Edit modal */}
+          {editEvent && editEvent.kind === "clin" && (
+            <EditEventModal event={editEvent.event} types={clinicalTypes||DEFAULT_CLINICAL_TYPES}
+              onSave={saveEditedClin} onDelete={() => deleteClin(editEvent.event.id)} onClose={() => setEditEvent(null)} />
+          )}
+          {editEvent && editEvent.kind === "adm" && (
+            <EditEventModal event={editEvent.event} types={adminTypes||DEFAULT_ADMIN_TYPES}
+              onSave={saveEditedAdm} onDelete={() => deleteAdm(editEvent.event.id)} onClose={() => setEditEvent(null)} />
+          )}
+
+          {/* Timeline table */}
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, tableLayout: "fixed" }}>
+              <colgroup>
+                <col style={{ width: 90 }} />
+                {cols.al && <><col style={{ width: 78 }} /><col style={{ width: 78 }} /></>}
+                {cols.rx && <><col style={{ width: 120 }} /><col style={{ width: 120 }} /></>}
+                {cols.clinical && <col style={{ minWidth: 160 }} />}
+                {cols.admin && <col style={{ minWidth: 160 }} />}
+                {cols.lens && <col style={{ minWidth: 120 }} />}
+                <col style={{ width: 52 }} />
+              </colgroup>
+              <thead>
+                <tr style={{ background: "#0f4c75" }}>
+                  <th style={{ ...th, background: "#0f4c75", color: "#fff" }}>Date</th>
+                  {cols.al && <>
+                    <th style={{ ...th, background: "#e8f0fe", color: "#0f4c75" }}>OD AL</th>
+                    <th style={{ ...th, background: "#e8f0fe", color: "#3b82f6" }}>OS AL</th>
+                  </>}
+                  {cols.rx && <>
+                    <th style={{ ...th, background: "#f0f9ff", color: "#0891b2" }}>OD Rx</th>
+                    <th style={{ ...th, background: "#f0f9ff", color: "#0891b2" }}>OS Rx</th>
+                  </>}
+                  {cols.clinical && <th style={{ ...th, background: "#eef2ff", color: "#3730a3" }}>🩺 Clinical</th>}
+                  {cols.admin    && <th style={{ ...th, background: "#f0fdfa", color: "#0891b2" }}>📋 Admin</th>}
+                  {cols.lens     && <th style={{ ...th, background: "#f0f9ff", color: "#0369a1" }}>👁 Lens</th>}
+                  <th style={{ ...th, background: "#f1f5f9", width: 52 }}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {allDates.map((date, rowIdx) => {
+                  const alEntry = als.find(m => m.date === date);
+                  const rxEntry = rxs.find(r => r.date === date);
+                  const clinEntries = (patient.clinicalEvents||[]).filter(e => e.date === date);
+                  const admEntries  = (patient.adminEvents||[]).filter(e => e.date === date);
+                  const lensEntries = (patient.lensHistory||[]).filter(l => l.date === date);
+                  if (!activeCols.some(c => {
+                    if (c.key === "al") return !!alEntry;
+                    if (c.key === "rx") return !!rxEntry;
+                    if (c.key === "clinical") return clinEntries.length > 0;
+                    if (c.key === "admin") return admEntries.length > 0;
+                    if (c.key === "lens") return lensEntries.length > 0;
+                    return false;
+                  })) return null;
+                  const alDelta = alEntry ? deltaMap[alEntry.id] : null;
+                  return (
+                    <tr key={date} style={{ background: rowIdx % 2 === 0 ? "#fff" : "#f8fafc" }}>
+                      <td style={{ ...td, verticalAlign: "top", paddingTop: 7 }}>
+                        <div style={{ fontWeight: 600, fontSize: 11, whiteSpace: "nowrap" }}>{fmtDate(date)}</div>
+                        {patient.therapyStartDate && (() => {
+                          const startDt = parseDate(patient.therapyStartDate), rowDt = parseDate(date);
+                          if (rowDt <= startDt) return null;
+                          return <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 1 }}>{durationLabel(startDt, rowDt)}</div>;
+                        })()}
+                        {alDelta?.deltaTime && <div style={{ fontSize: 10, color: "#475569", marginTop: 1 }}>↑ {alDelta.deltaTime}</div>}
+                      </td>
+                      {cols.al && <>
+                        <td style={{ ...td, verticalAlign: "top" }}>
+                          {alEntry ? (
+                            <div style={{ whiteSpace: "nowrap" }}>
+                              <span style={{ color: "#0f4c75", fontWeight: 600 }}>{alEntry.od}</span>
+                              {alDelta?.deltaOD !== null && <span style={{ fontSize: 10, color: "#94a3b8", marginLeft: 3 }}>({sgnFmt(alDelta.deltaOD)})</span>}
+                              {alEntry.notes && <div style={{ fontSize: 10, color: "#64748b", marginTop: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{alEntry.notes}</div>}
+                            </div>
+                          ) : <span style={{ color: "#e2e8f0" }}>·</span>}
+                        </td>
+                        <td style={{ ...td, verticalAlign: "top" }}>
+                          {alEntry ? (
+                            <div style={{ whiteSpace: "nowrap" }}>
+                              <span style={{ color: "#3b82f6", fontWeight: 600 }}>{alEntry.os}</span>
+                              {alDelta?.deltaOS !== null && <span style={{ fontSize: 10, color: "#94a3b8", marginLeft: 3 }}>({sgnFmt(alDelta.deltaOS)})</span>}
+                            </div>
+                          ) : <span style={{ color: "#e2e8f0" }}>·</span>}
+                        </td>
+                      </>}
+                      {cols.rx && <>
+                        <td style={{ ...td, verticalAlign: "top", fontSize: 11, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {rxEntry ? fmtRxCell(rxEntry.odSph, rxEntry.odCyl, rxEntry.odAxis) : <span style={{ color: "#e2e8f0" }}>·</span>}
+                        </td>
+                        <td style={{ ...td, verticalAlign: "top", fontSize: 11, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {rxEntry ? fmtRxCell(rxEntry.osSph, rxEntry.osCyl, rxEntry.osAxis) : <span style={{ color: "#e2e8f0" }}>·</span>}
+                        </td>
+                      </>}
+                      {cols.clinical && (
+                        <td style={{ ...td, verticalAlign: "top", minWidth: 0, width: "auto" }}>
+                          {clinEntries.length === 0 ? <span style={{ color: "#e2e8f0" }}>·</span> : (
+                            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                              {clinEntries.map(e => (
+                                <div key={e.id} title={[e.type, e.notes].filter(Boolean).join(" — ")}
+                                  style={{ borderLeft: "3px solid #3730a3", paddingLeft: 6, position: "relative", paddingRight: 16, cursor: "default" }}>
+                                  <div style={{ fontWeight: 600, color: "#3730a3", fontSize: 11, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{e.type}</div>
+                                  {e.notes && <div style={{ fontSize: 11, color: "#64748b", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{e.notes}</div>}
+                                  <button onClick={() => setEditEvent({event: e, kind: "clin"})}
+                                    style={{ position: "absolute", top: 0, right: 0, background: "none", border: "none", cursor: "pointer", color: "#cbd5e1", fontSize: 9, padding: 0, lineHeight: 1 }} title="Edit">✎</button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </td>
+                      )}
+                      {cols.admin && (
+                        <td style={{ ...td, verticalAlign: "top", minWidth: 0, width: "auto" }}>
+                          {admEntries.length === 0 ? <span style={{ color: "#e2e8f0" }}>·</span> : (
+                            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                              {admEntries.map(e => (
+                                <div key={e.id} title={[e.type, e.notes].filter(Boolean).join(" — ")}
+                                  style={{ borderLeft: "3px solid #0891b2", paddingLeft: 6, position: "relative", paddingRight: 16, cursor: "default" }}>
+                                  <div style={{ fontWeight: 600, color: "#0891b2", fontSize: 11, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{e.type}</div>
+                                  {e.notes && <div style={{ fontSize: 11, color: "#64748b", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{e.notes}</div>}
+                                  {e.cost && <div style={{ fontSize: 11, color: "#16a34a", whiteSpace: "nowrap", fontWeight: 600 }}>${parseFloat(e.cost).toFixed(2)}</div>}
+                                  {e.warrantyVoided && <div style={{ fontSize: 10, color: "#dc2626", whiteSpace: "nowrap", fontWeight: 600 }}>🚫 Warranty voided{e.voidDate ? ` ${fmtDate(e.voidDate)}` : ""}</div>}
+                                  <button onClick={() => setEditEvent({event: e, kind: "adm"})}
+                                    style={{ position: "absolute", top: 0, right: 0, background: "none", border: "none", cursor: "pointer", color: "#cbd5e1", fontSize: 9, padding: 0, lineHeight: 1 }} title="Edit">✎</button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </td>
+                      )}
+                      {cols.lens && (
+                        <td style={{ ...td, verticalAlign: "top" }}>
+                          {lensEntries.length === 0 ? <span style={{ color: "#e2e8f0" }}>·</span> : (
+                            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                              {lensEntries.map(l => (
+                                <div key={l.id} title={[l.type, l.reason].filter(Boolean).join(" — ")}
+                                  style={{ borderLeft: "3px solid #0369a1", paddingLeft: 6, cursor: "default" }}>
+                                  <div style={{ fontWeight: 600, color: "#0369a1", fontSize: 11, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{l.type}</div>
+                                  {l.reason && <div style={{ fontSize: 11, color: "#64748b", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{l.reason}</div>}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </td>
+                      )}
+                      <td style={{ ...td, verticalAlign: "top", whiteSpace: "nowrap", textAlign: "center" }}>
+                        {alEntry && <button onClick={() => removeAL(alEntry.id)} style={{ background: "#fce7f3", border: "none", borderRadius: 4, padding: "2px 5px", cursor: "pointer", color: "#db2777", fontSize: 10, display: "block", marginBottom: 2, width: "100%" }}>AL ✕</button>}
+                        {rxEntry && <button onClick={() => removeRx(rxEntry.id)} style={{ background: "#e0f2fe", border: "none", borderRadius: 4, padding: "2px 5px", cursor: "pointer", color: "#0891b2", fontSize: 10, display: "block", width: "100%" }}>Rx ✕</button>}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      );
+    }
+
+    // ── BV Tab ─────────────────────────────────────────────────────────────────
+    function BVTab({ patient, onUpdate, bvTests }) {
+      const tests = bvTests || DEFAULT_BV_TESTS;
+      const [adding, setAdding] = useState(false);
+      const [form, setForm] = useState({ date: today(), results: {}, notes: "" });
+      const entries = [...(patient.bvEntries||[])].sort((a,b) => a.date.localeCompare(b.date));
+      const save = () => {
+        if (!form.date) return;
+        onUpdate({ ...patient, bvEntries: [...(patient.bvEntries||[]), { id: uid(), date: form.date, results: form.results, notes: form.notes }] });
+        setForm({ date: today(), results: {}, notes: "" }); setAdding(false);
+      };
+      const remove = (id) => onUpdate({ ...patient, bvEntries: (patient.bvEntries||[]).filter(x => x.id !== id) });
+      return (
+        <div>
+          <div style={{ display: "flex", gap: 10, marginBottom: 16, alignItems: "center" }}>
+            <button onClick={() => setAdding(v => !v)} style={btnStyle("#0369a1")}>+ BV Entry</button>
+            <span style={{ fontSize: 12, color: "#64748b" }}>Tests configured in Settings</span>
+          </div>
+          {adding && (
+            <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: "14px 16px", marginBottom: 16 }}>
+              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 10 }}>New BV Assessment</div>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+                <label style={labelStyle}>Date<input type="date" value={form.date} onChange={e => setForm(f => ({...f,date:e.target.value}))} style={{...inputStyle, width: 150}} /></label>
+                <label style={{...labelStyle, flex:"2 1 220px"}}>Overall Notes<input value={form.notes} onChange={e => setForm(f => ({...f,notes:e.target.value}))} placeholder="Overall impressions…" style={inputStyle} /></label>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 16px", marginBottom: 12 }}>
+                {tests.map(test => (
+                  <label key={test} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
+                    <span style={{ color: "#475569", minWidth: 160, flexShrink: 0 }}>{test}</span>
+                    <input value={form.results[test]||""} onChange={e => setForm(f => ({...f,results:{...f.results,[test]:e.target.value}}))} placeholder="—" style={{ ...inputStyle, width: 100, fontSize: 12 }} />
+                  </label>
+                ))}
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={save} style={btnStyle("#0369a1")}>Save</button>
+                <button onClick={() => setAdding(false)} style={btnStyle("#94a3b8")}>Cancel</button>
+              </div>
+            </div>
+          )}
+          {entries.length === 0 && !adding && <div style={{ color: "#94a3b8", fontSize: 13, padding: "20px 0" }}>No BV assessments recorded.</div>}
+          {entries.length > 0 && (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ borderCollapse: "collapse", fontSize: 12, width: "100%" }}>
+                <thead>
+                  <tr style={{ background: "#f1f5f9" }}>
+                    <th style={{ ...th, minWidth: 160 }}>Test</th>
+                    {entries.map(entry => (
+                      <th key={entry.id} style={{ ...th, textAlign: "center", whiteSpace: "nowrap" }}>
+                        <div>{fmtDate(entry.date)}</div>
+                        <button onClick={() => remove(entry.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#cbd5e1", fontSize: 10, padding: 0, marginTop: 2 }}>✕ remove</button>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {tests.map((test, i) => (
+                    <tr key={test} style={{ background: i % 2 === 0 ? "#fff" : "#f8fafc" }}>
+                      <td style={{ ...td, fontWeight: 600, color: "#475569", whiteSpace: "nowrap" }}>{test}</td>
+                      {entries.map(entry => (
+                        <td key={entry.id} style={{ ...td, textAlign: "center", color: entry.results[test] ? "#1e293b" : "#cbd5e1" }}>{entry.results[test] || "–"}</td>
+                      ))}
+                    </tr>
+                  ))}
+                  <tr style={{ background: "#f0f9ff" }}>
+                    <td style={{ ...td, fontWeight: 600, color: "#0369a1", fontStyle: "italic" }}>Notes</td>
+                    {entries.map(entry => (
+                      <td key={entry.id} style={{ ...td, fontSize: 11, color: "#64748b", fontStyle: "italic" }}>{entry.notes || "—"}</td>
+                    ))}
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function ALGraphTab({ patient }) {
+      return (
+        <div>
+          <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 8, color: "#0f4c75" }}>Axial Length Over Time</div>
+          <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 12, display: "flex", gap: 16, flexWrap: "wrap" }}>
+            <span>🟡 Yellow = Treatment Change</span><span>🟣 Purple = Rx visits</span><span>🟢 Green = therapy start</span>
+            <span style={{ fontStyle: "italic" }}>Hover dots for values</span>
+          </div>
+          <ALGraph patient={patient} />
+        </div>
+      );
+    }
+
+    function LensForm({ initialValues, isOrthoK, onSave, onCancel, title }) {
+      const [form, setForm] = useState({ ...initialValues });
+      const showOrthoKFields = isOrthoK || form.type === "Ortho-K";
+      return (
+        <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: "14px 16px", marginTop: 14 }}>
+          <div style={{ fontWeight: 600, marginBottom: 10, fontSize: 13 }}>{title}</div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+            <label style={labelStyle}>Date<input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} style={inputStyle} /></label>
+            <label style={labelStyle}>Type<input value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))} style={inputStyle} /></label>
+            <label style={{ ...labelStyle, flex: "1 1 200px" }}>Reason<input value={form.reason||""} onChange={e => setForm(f => ({ ...f, reason: e.target.value }))} style={inputStyle} /></label>
+            <label style={labelStyle}>Warranty Start<input type="date" value={form.warrantyStart||""} onChange={e => setForm(f => ({ ...f, warrantyStart: e.target.value }))} style={inputStyle} /></label>
+            <label style={{ ...labelStyle, flex: "0 0 80px" }}>Warranty (mo)<input type="number" step="0.5" value={form.warrantyMonths||""} onChange={e => setForm(f => ({ ...f, warrantyMonths: e.target.value }))} style={inputStyle} /></label>
+
+          </div>
+          {[["OD","od"],["OS","os"]].map(([eye,prefix]) => (
+            <div key={eye} style={{ marginBottom: 10 }}>
+              <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 6, color: prefix==="od"?"#0f4c75":"#3b82f6" }}>{eye}</div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {[["BC","BC"],["Power","Power"],["Diam","Diam"]].map(([l,k]) => (
+                  <label key={k} style={labelStyle}>{l}<input value={form[`${prefix}${k}`]||""} onChange={e => setForm(f => ({ ...f, [`${prefix}${k}`]: e.target.value }))} style={{ ...inputStyle, width: 70 }} /></label>
+                ))}
+                {showOrthoKFields && [["RZD1","RZD1"],["RZD2","RZD2"],["LZA1","LZA1"],["LZA2","LZA2"]].map(([l,k]) => (
+                  <label key={k} style={labelStyle}>{l}<input value={form[`${prefix}${k}`]||""} onChange={e => setForm(f => ({ ...f, [`${prefix}${k}`]: e.target.value }))} style={{ ...inputStyle, width: 60 }} /></label>
+                ))}
+                <label style={labelStyle}>Color<input value={form[`${prefix}Color`]||""} onChange={e => setForm(f => ({ ...f, [`${prefix}Color`]: e.target.value }))} style={{ ...inputStyle, width: 80 }} /></label>
+              </div>
+            </div>
+          ))}
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => onSave(form)} style={btnStyle("#0f4c75")}>Save</button>
+            <button onClick={onCancel} style={btnStyle("#94a3b8")}>Cancel</button>
+          </div>
+        </div>
+      );
+    }
+
+    function LensHistoryTab({ patient, onUpdate, defaultWarrantyMonths }) {
+      const [adding, setAdding] = useState(false);
+      const [editingId, setEditingId] = useState(null);
+      const isOrthoK = patient.therapy === "Ortho-K" || patient.combinationTherapy === "Ortho-K";
+      const blankForm = { date: today(), type: patient.therapy || "Ortho-K", odBC: "", odPower: "", odDiam: "", odRZD1: "", odRZD2: "", odLZA1: "", odLZA2: "", odColor: "Green", osBC: "", osPower: "", osDiam: "", osRZD1: "", osRZD2: "", osLZA1: "", osLZA2: "", osColor: "Blue", reason: "", warrantyStart: "", warrantyMonths: String(defaultWarrantyMonths||4) };
+
+      const saveNew = (form) => {
+        if (!form.date) return;
+        onUpdate({ ...patient, lensHistory: [...(patient.lensHistory||[]), { id: uid(), ...form, odBC: parseFloat(form.odBC)||0, odPower: parseFloat(form.odPower)||0, odDiam: parseFloat(form.odDiam)||0, osBC: parseFloat(form.osBC)||0, osPower: parseFloat(form.osPower)||0, osDiam: parseFloat(form.osDiam)||0 }] });
+        setAdding(false);
+      };
+      const saveEdit = (form) => {
+        onUpdate({ ...patient, lensHistory: patient.lensHistory.map(x => x.id === form.id ? { ...form, odBC: parseFloat(form.odBC)||0, odPower: parseFloat(form.odPower)||0, odDiam: parseFloat(form.odDiam)||0, osBC: parseFloat(form.osBC)||0, osPower: parseFloat(form.osPower)||0, osDiam: parseFloat(form.osDiam)||0 } : x) });
+        setEditingId(null);
+      };
+      const remove = (id) => onUpdate({ ...patient, lensHistory: patient.lensHistory.filter(x => x.id !== id) });
+      const lenses = [...(patient.lensHistory||[])].sort((a,b) => b.date.localeCompare(a.date));
+
+      return (
+        <div>
+          <button onClick={() => { setAdding(v => !v); setEditingId(null); }} style={btnStyle("#0f4c75")}>+ Add Lens Entry</button>
+          {adding && <LensForm initialValues={blankForm} isOrthoK={isOrthoK} onSave={saveNew} onCancel={() => setAdding(false)} title="New Lens Parameters" />}
+          <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+            {lenses.map(l => {
+              const wStart = l.warrantyStart ? parseDate(l.warrantyStart) : null;
+              const wMonths = l.warrantyMonths ? parseFloat(l.warrantyMonths) : (defaultWarrantyMonths||4);
+              const wExpiry = wStart ? new Date(wStart.getTime() + wMonths * 30.44 * 86400000) : null;
+              const daysLeft = wExpiry ? daysBetween(new Date(), wExpiry) : null;
+              return (
+                <div key={l.id} style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: "14px 16px", background: "#f8fafc" }}>
+                  {editingId === l.id ? (
+                    <LensForm initialValues={l} isOrthoK={isOrthoK} onSave={saveEdit} onCancel={() => setEditingId(null)} title="Edit Lens Entry" />
+                  ) : (
+                    <>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                        <div>
+                          <span style={{ fontWeight: 700, fontSize: 14 }}>{l.type}</span>
+                          <span style={{ marginLeft: 10, fontSize: 12, color: "#64748b" }}>{fmtDate(l.date)}</span>
+                          {l.reason && <span style={{ marginLeft: 8, fontSize: 11, color: "#94a3b8", fontStyle: "italic" }}>— {l.reason}</span>}
+                          {wExpiry && (
+                            <span style={{ marginLeft: 10, fontSize: 11, fontWeight: 600, color: daysLeft < 0 ? "#dc2626" : daysLeft <= 14 ? "#dc2626" : daysLeft <= 30 ? "#92400e" : "#475569" }}>
+                              🛡 {daysLeft < 0 ? `Expired ${durationLabel(wExpiry, new Date())} ago` : `Expires ${fmtDate(wExpiry.toISOString().slice(0,10))} (${durationLabel(new Date(), wExpiry)})`}
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                          <button onClick={() => { setEditingId(l.id); setAdding(false); }} style={{ background: "#e0f2fe", border: "none", borderRadius: 5, padding: "3px 10px", cursor: "pointer", color: "#0369a1", fontSize: 11, fontWeight: 600 }}>✏️ Edit</button>
+                          <button onClick={() => remove(l.id)} style={{ background: "#fce7f3", border: "none", borderRadius: 5, padding: "3px 8px", cursor: "pointer", color: "#db2777", fontSize: 11 }}>Remove</button>
+                        </div>
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 10 }}>
+                        {[["OD","od","#0f4c75"],["OS","os","#3b82f6"]].map(([eye,p,col]) => (
+                          <div key={eye} style={{ background: "#fff", borderRadius: 8, padding: "10px 12px", border: `1px solid ${col}22` }}>
+                            <div style={{ fontWeight: 700, color: col, fontSize: 12, marginBottom: 6 }}>{eye}</div>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 14px", fontSize: 12 }}>
+                              <span>BC: <strong>{l[`${p}BC`]}</strong></span>
+                              <span>Power: <strong>{l[`${p}Power`]}</strong></span>
+                              <span>Diam: <strong>{l[`${p}Diam`]}</strong></span>
+                              {l[`${p}RZD1`] !== undefined && l[`${p}RZD1`] !== "" && <><span>RZD1: <strong>{l[`${p}RZD1`]}</strong></span><span>RZD2: <strong>{l[`${p}RZD2`]}</strong></span><span>LZA1: <strong>{l[`${p}LZA1`]}</strong></span><span>LZA2: <strong>{l[`${p}LZA2`]}</strong></span></>}
+                              {l[`${p}Color`] && <span>Color: <strong style={{ color: col }}>{l[`${p}Color`]}</strong></span>}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            })}
+            {lenses.length === 0 && <div style={{ color: "#94a3b8", fontSize: 13 }}>No lens history recorded.</div>}
+          </div>
+        </div>
+      );
+    }
+
+    // ── Calculator (unchanged) ─────────────────────────────────────────────────
+    const CALC_INT_EFFECT = { none:0, ortho_k:0.50, misight:0.55, atropine_01:0.20, atropine_05:0.50, stellest:0.575, mf_soft:0.40, combo:0.70, stellest_atro:0.65 };
+    const CALC_INT_LABELS = { none:'No intervention', ortho_k:'Orthokeratology', misight:'MiSight 1 day', atropine_01:'Atropine 0.01%', atropine_05:'Atropine 0.05%', stellest:'Stellest/DIMS', mf_soft:'MF soft CL', combo:'Ortho-K + atropine', stellest_atro:'Stellest + atropine' };
+    const CALC_ETH_MULT = { east_asian:1.55, south_asian:1.20, hispanic:1.10, white:1.00, black:0.75, mixed:1.05 };
+    const CALC_ETH_LABELS = { east_asian:'East Asian', south_asian:'South Asian', hispanic:'Hispanic/Latino', white:'Caucasian', black:'African', mixed:'Mixed/Other' };
+    function calcBaseProgRate(age) { if(age<7)return 1.10;if(age<9)return 0.90;if(age<11)return 0.75;if(age<13)return 0.65;if(age<15)return 0.45;if(age<17)return 0.25;return 0.10; }
+    function calcPredictOnset(age,rx,al,ethnicity,parents,outdoor){const em=CALC_ETH_MULT[ethnicity]||1.0;let plusReserve=(rx!==null&&rx!=='')?parseFloat(rx):0.75;let annualLoss=0.18*em;if(parents==2)annualLoss*=1.30;else if(parents==1)annualLoss*=1.15;if(outdoor==0)annualLoss*=1.20;else if(outdoor==2)annualLoss*=0.85;if(al!==null){const normAL=22.0+(age-5)*0.1,excess=al-normAL;if(excess>1.0)annualLoss*=1.25;else if(excess>0.5)annualLoss*=1.12;}let simRx=plusReserve,simAge=age;while(simRx>0&&simAge<25){simRx-=annualLoss;simAge++;}return simAge>=25?null:Math.round(simAge);}
+    function calcComputeRisk(inputs){let score=0;const factors=[];const{age,rx,al,onset,prog,ethnicity,parents,parent_rx,outdoor,nearwork,isPreMyope,predictedOnset,rf_premature,rf_urban,rf_asian_school,rf_atopy}=inputs;const em=CALC_ETH_MULT[ethnicity]||1.0;if(isPreMyope){if(rx!==null&&rx<=0.50){score+=20;factors.push({label:`Low hyperopic buffer (${rx>=0?'+':''}${rx}D)`,pts:20});}else if(rx!==null&&rx<=1.00){score+=10;factors.push({label:`Moderate hyperopic reserve (+${rx}D)`,pts:10});}if(predictedOnset!==null){const yrs=predictedOnset-age;if(yrs<=1){score+=20;factors.push({label:'Onset predicted within 1 year',pts:20});}else if(yrs<=2){score+=12;factors.push({label:'Onset predicted within 2 years',pts:12});}else if(yrs<=3){score+=6;factors.push({label:'Onset predicted within 3 years',pts:6});}}}else{if(onset!==null){if(onset<=6){score+=25;factors.push({label:'Very early onset (<=6 yrs)',pts:25});}else if(onset<=8){score+=15;factors.push({label:'Early onset (<=8 yrs)',pts:15});}else if(onset<=10){score+=8;factors.push({label:'Onset <=10 yrs',pts:8});}}if(rx!==null){if(rx<=-5){score+=22;factors.push({label:`High myopia (${rx}D)`,pts:22});}else if(rx<=-3){score+=14;factors.push({label:`Moderate myopia (${rx}D)`,pts:14});}else if(rx<=-1){score+=7;factors.push({label:`Low myopia (${rx}D)`,pts:7});}}if(prog&&prog>=0.75){score+=15;factors.push({label:`Rapid progression (${prog}D/yr)`,pts:15});}}if(al!==null){const normAL=22.0+(age-5)*0.1,excess=al-normAL;if(excess>1.5){score+=18;factors.push({label:`AL ${al}mm (>1.5mm above norm)`,pts:18});}else if(excess>0.8){score+=10;factors.push({label:`AL ${al}mm (elongated for age)`,pts:10});}}if(parents==2){score+=20;factors.push({label:'Both parents myopic',pts:20});}else if(parents==1){score+=10;factors.push({label:'One parent myopic',pts:10});}if(parent_rx!==null&&parent_rx<=-4){score+=8;factors.push({label:`Parental high myopia (${parent_rx}D)`,pts:8});}if(em>=1.4){score+=12;factors.push({label:'East Asian ancestry',pts:12});}else if(em>=1.1){score+=6;factors.push({label:'South/Hispanic ancestry',pts:6});}else if(em<0.9){score-=5;factors.push({label:'African ancestry (lower risk)',pts:-5});}if(outdoor==0){score+=10;factors.push({label:'<1 hr/day outdoors',pts:10});}else if(outdoor==1){score+=4;factors.push({label:'1-2 hrs/day outdoors',pts:4});}else{score-=5;factors.push({label:'2+ hrs/day outdoors',pts:-5});}if(nearwork==2){score+=8;factors.push({label:'4+ hrs near work',pts:8});}else if(nearwork==1){score+=4;factors.push({label:'2-4 hrs near work',pts:4});}if(rf_premature){score+=5;factors.push({label:'Premature birth',pts:5});}if(rf_urban){score+=4;factors.push({label:'Urban environment',pts:4});}if(rf_asian_school){score+=5;factors.push({label:'High academic load',pts:5});}if(rf_atopy){score+=3;factors.push({label:'Atopic conditions',pts:3});}return{score:Math.max(0,Math.min(100,score)),factors};}
+    function calcBuildProjection(inputs){const{age,rx,prog,ethnicity,intervention,isPreMyope,predictedOnset}=inputs;const em=CALC_ETH_MULT[ethnicity]||1.0,intEffect=CALC_INT_EFFECT[intervention]||0;const maxAge=22;const ages=[],untreated=[],treated=[];function annualRate(a){return(prog&&!isPreMyope)?prog*em:calcBaseProgRate(a)*em;}if(isPreMyope){const onsetAge=predictedOnset||(age+3),startPlus=(rx!==null&&rx!=='')?parseFloat(rx):0.75;const steps=Math.max(onsetAge-age,1),annualDrop=startPlus/steps;let simPlus=startPlus;for(let a=age;a<=onsetAge;a++){ages.push(a);const v=+Math.max(simPlus,0).toFixed(2);untreated.push(v);treated.push(v);simPlus-=annualDrop;}let rxU=0,rxT=0;for(let a=onsetAge;a<maxAge;a++){const r=annualRate(a);rxU=Math.max(rxU-r,-22);rxT=Math.max(rxT-r*(1-intEffect),-22);ages.push(a+1);untreated.push(+rxU.toFixed(2));treated.push(+rxT.toFixed(2));}}else{let rxU=parseFloat(rx)||0,rxT=parseFloat(rx)||0;ages.push(age);untreated.push(+rxU.toFixed(2));treated.push(+rxT.toFixed(2));for(let a=age;a<maxAge;a++){const r=annualRate(a);rxU=Math.max(rxU-r,-22);rxT=Math.max(rxT-r*(1-intEffect),-22);ages.push(a+1);untreated.push(+rxU.toFixed(2));treated.push(+rxT.toFixed(2));}}return{ages,untreated,treated};}
+    function getRiskTier(score){if(score>=70)return{label:'High Risk',color:'#c94040',bg:'#fff1f2'};if(score>=45)return{label:'Moderate Risk',color:'#e8a245',bg:'#fef3c7'};if(score>=20)return{label:'Low-Moderate',color:'#2a7d6e',bg:'#e8f5f2'};return{label:'Low Risk',color:'#16a34a',bg:'#f0fdf4'};}
+
+    function CalculatorTab({ patient, onUpdate }) {
+      const als=[...(patient.alMeasurements||[])].sort((a,b)=>a.date.localeCompare(b.date));const rxs=[...(patient.refractions||[])].sort((a,b)=>a.date.localeCompare(b.date));const latestAL=als[als.length-1],latestRx=rxs[rxs.length-1];const ageFromDOB=()=>{if(!patient.dob)return 10;const birth=new Date(patient.dob+"T00:00:00"),now=new Date();let y=now.getFullYear()-birth.getFullYear();if(now.getMonth()<birth.getMonth()||(now.getMonth()===birth.getMonth()&&now.getDate()<birth.getDate()))y--;return Math.max(1,Math.min(y,30));};const onsetFromData=()=>{if(!patient.therapyStartDate||!patient.dob)return'';const birth=new Date(patient.dob+"T00:00:00"),start=new Date(patient.therapyStartDate+"T00:00:00");let y=start.getFullYear()-birth.getFullYear();if(start.getMonth()<birth.getMonth()||(start.getMonth()===birth.getMonth()&&start.getDate()<birth.getDate()))y--;return String(Math.max(1,Math.min(y,20)));};const progFromAL=()=>{if(als.length<2)return'';const last=als[als.length-1],prev=als[als.length-2],days=daysBetween(parseDate(prev.date),parseDate(last.date));return days>0?((parseFloat(last.od)-parseFloat(prev.od))/days*365).toFixed(2):'';};const interventionFromTherapy=()=>{const t=patient.therapy;if(t==='Ortho-K')return'ortho_k';if(t==='MiSight')return'misight';if(t==='Atropine')return patient.atropineConc==='0.01%'?'atropine_01':'atropine_05';if(t==='Stellest')return'stellest';return'none';};const parentsFromData=()=>{const p1=patient.parent1Myopia||'',p2=patient.parent2Myopia||'';const m1=(p1&&p1!=='None'&&p1!=='Unknown')?1:0,m2=(p2&&p2!=='None'&&p2!=='Unknown')?1:0;return String(m1+m2);};const worseRx=latestRx?(Math.min(latestRx.odSph,latestRx.osSph)):null;const worseAL=latestAL?(Math.max(latestAL.od,latestAL.os)):null;const ageVal=ageFromDOB();
+      const[form,setForm]=useState({age:String(ageVal),sex:'F',ethnicity:'east_asian',rx:worseRx!==null?String(worseRx):'',al:worseAL!==null?String(worseAL):'',onset:onsetFromData(),prog:progFromAL(),parents:parentsFromData(),parent_rx:'',outdoor:'1',nearwork:'1',intervention:interventionFromTherapy(),rf_premature:false,rf_urban:false,rf_asian_school:false,rf_atopy:false});
+      const[result,setResult]=useState(null);const[snapshotLabel,setSnapshotLabel]=useState('');const[saved,setSaved]=useState(false);
+      const runCalc=()=>{const age=parseInt(form.age)||10,rx=form.rx!==''?parseFloat(form.rx):null,al=form.al!==''?parseFloat(form.al):null;const onset=form.onset!==''?parseInt(form.onset):null,prog=form.prog!==''?parseFloat(form.prog):null;const parents=parseInt(form.parents)||0,parent_rx=form.parent_rx!==''?parseFloat(form.parent_rx):null;const outdoor=parseInt(form.outdoor),nearwork=parseInt(form.nearwork),isPreMyope=rx===null||rx>=0;const predictedOnset=isPreMyope?calcPredictOnset(age,rx,al,form.ethnicity,parents,outdoor):null;const inputs={age,sex:form.sex,ethnicity:form.ethnicity,rx,al,onset,prog,parents,parent_rx,outdoor,nearwork,intervention:form.intervention,isPreMyope,predictedOnset,rf_premature:form.rf_premature,rf_urban:form.rf_urban,rf_asian_school:form.rf_asian_school,rf_atopy:form.rf_atopy};const{score,factors}=calcComputeRisk(inputs);const proj=calcBuildProjection(inputs);const i18=proj.ages.indexOf(18),rxAt18U=i18>=0?proj.untreated[i18]:proj.untreated[proj.untreated.length-1],rxAt18T=i18>=0?proj.treated[i18]:proj.treated[proj.treated.length-1];setResult({inputs,score,factors,proj,rxAt18U,rxAt18T,tier:getRiskTier(score),date:today()});setSaved(false);};
+      const saveSnapshot=()=>{if(!result)return;const worseRxSnap=latestRx?Math.min(latestRx.odSph,latestRx.osSph):null,worseALSnap=latestAL?Math.max(latestAL.od,latestAL.os):null;const snap={id:uid(),date:today(),label:snapshotLabel||`Assessment ${fmtDate(today())}`,inputs:result.inputs,score:result.score,tier:result.tier.label,rxAt18U:result.rxAt18U,rxAt18T:result.rxAt18T,intervention:form.intervention,actualRx:worseRxSnap,actualAL:worseALSnap};onUpdate({...patient,calcSnapshots:[...(patient.calcSnapshots||[]),snap]});setSaved(true);setSnapshotLabel('');setTimeout(()=>setSaved(false),2500);};
+      const removeSnapshot=(id)=>onUpdate({...patient,calcSnapshots:(patient.calcSnapshots||[]).filter(s=>s.id!==id)});const snapshots=[...(patient.calcSnapshots||[])].sort((a,b)=>b.date.localeCompare(a.date));const selStyle={...inputStyle,fontSize:12};const fld=(label,key,type='number',opts=null)=>(<label style={{display:'flex',flexDirection:'column',gap:2,fontSize:11,color:'#64748b'}}>{label}{opts?<select value={form[key]} onChange={e=>setForm(f=>({...f,[key]:e.target.value}))} style={selStyle}>{opts.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select>:<input type={type} value={form[key]} onChange={e=>setForm(f=>({...f,[key]:e.target.value}))} style={selStyle} />}</label>);
+      return(<div><div style={{fontSize:12,color:'#64748b',marginBottom:14,background:'#f0f9ff',borderRadius:8,padding:'10px 14px',border:'1px solid #bae6fd'}}>Fields pre-filled from patient data where available. Review and adjust before running.</div><div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(130px,1fr))',gap:8,marginBottom:10}}>{fld('Age','age')}{fld('Sex','sex','text',[['F','Female'],['M','Male']])}{fld('Ethnicity','ethnicity','text',Object.entries(CALC_ETH_LABELS))}{fld('Current Rx — worse eye (D)','rx')}{fld('Current AL — worse eye (mm)','al')}{fld('Onset age (yrs)','onset','number')}{fld('Progression (D/yr)','prog')}{fld('Parents myopic','parents','text',[['0','None'],['1','One'],['2','Both']])}{fld('Highest parental Rx (worst eye, D)','parent_rx')}{fld('Outdoor time','outdoor','text',[['0','<1 hr/day'],['1','1-2 hrs/day'],['2','2+ hrs/day']])}{fld('Near work','nearwork','text',[['0','<2 hrs/day'],['1','2-4 hrs/day'],['2','4+ hrs/day']])}{fld('Intervention','intervention','text',Object.entries(CALC_INT_LABELS))}</div><div style={{display:'flex',gap:16,marginBottom:12,flexWrap:'wrap'}}>{[['rf_premature','Premature birth'],['rf_urban','Urban'],['rf_asian_school','High academic load'],['rf_atopy','Atopic conditions']].map(([k,l])=>(<label key={k} style={{display:'flex',alignItems:'center',gap:6,fontSize:12,cursor:'pointer'}}><input type="checkbox" checked={form[k]} onChange={e=>setForm(f=>({...f,[k]:e.target.checked}))} />{l}</label>))}</div><button onClick={runCalc} style={{...btnStyle('#0f4c75'),padding:'9px 22px',fontSize:13,marginBottom:16}}>Run Calculator</button>{result&&(<div style={{background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:10,padding:'16px',marginBottom:20}}><div style={{display:'flex',gap:14,flexWrap:'wrap',marginBottom:14}}><div style={{background:result.tier.bg,border:`1px solid ${result.tier.color}33`,borderRadius:10,padding:'12px 16px',minWidth:130}}><div style={{fontSize:10,fontWeight:700,color:result.tier.color,textTransform:'uppercase',letterSpacing:'0.06em'}}>Risk Score</div><div style={{fontSize:36,fontWeight:700,color:result.tier.color,fontFamily:'DM Sans,sans-serif',lineHeight:1.1}}>{result.score}</div><div style={{fontSize:12,fontWeight:600,color:result.tier.color}}>{result.tier.label}</div></div><div style={{background:'white',border:'1px solid #e2e8f0',borderRadius:10,padding:'12px 16px',flex:1,minWidth:200}}><div style={{fontSize:10,fontWeight:700,color:'#64748b',textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:8}}>Projected Rx at Age 18</div><div style={{fontSize:13,marginBottom:4}}><span style={{color:'#64748b'}}>Untreated: </span><strong style={{color:'#c94040'}}>{result.rxAt18U>=0?'+':''}{result.rxAt18U?.toFixed(2)}D</strong></div>{form.intervention!=='none'&&<div style={{fontSize:13}}><span style={{color:'#64748b'}}>With {CALC_INT_LABELS[form.intervention]}: </span><strong style={{color:'#2a7d6e'}}>{result.rxAt18T>=0?'+':''}{result.rxAt18T?.toFixed(2)}D</strong></div>}{result.inputs.isPreMyope&&result.inputs.predictedOnset&&<div style={{fontSize:12,color:'#92400e',marginTop:8,padding:'6px 10px',background:'#fef3c7',borderRadius:6}}>Predicted onset: age {result.inputs.predictedOnset}</div>}</div><div style={{background:'white',border:'1px solid #e2e8f0',borderRadius:10,padding:'12px 16px',flex:2,minWidth:200}}><div style={{fontSize:10,fontWeight:700,color:'#64748b',textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:8}}>Risk Factors</div><div style={{display:'flex',flexDirection:'column',gap:3}}>{result.factors.map((f,i)=>(<div key={i} style={{display:'flex',justifyContent:'space-between',fontSize:11}}><span style={{color:'#475569'}}>{f.label}</span><span style={{fontWeight:600,color:f.pts>0?'#c94040':'#16a34a',marginLeft:8}}>{f.pts>0?'+':''}{f.pts}</span></div>))}</div></div></div><div style={{overflowX:'auto',marginBottom:14}}><table style={{borderCollapse:'collapse',fontSize:11,width:'100%'}}><thead><tr style={{background:'#f1f5f9'}}><th style={{...th,fontSize:10}}>Age</th>{result.proj.ages.filter(a=>a>=result.inputs.age&&a<=22).map(a=><th key={a} style={{...th,fontSize:10,textAlign:'center'}}>{a}</th>)}</tr></thead><tbody><tr><td style={{...td,fontSize:11,fontWeight:600,color:'#64748b',whiteSpace:'nowrap'}}>Untreated</td>{result.proj.ages.filter(a=>a>=result.inputs.age&&a<=22).map(a=>{const idx=result.proj.ages.indexOf(a),v=result.proj.untreated[idx];return<td key={a} style={{...td,textAlign:'center',color:v<=-6?'#c94040':'#1e293b'}}>{v>=0?'+':''}{v?.toFixed(2)}</td>;})}</tr>{form.intervention!=='none'&&<tr><td style={{...td,fontSize:11,fontWeight:600,color:'#2a7d6e',whiteSpace:'nowrap'}}>{CALC_INT_LABELS[form.intervention]}</td>{result.proj.ages.filter(a=>a>=result.inputs.age&&a<=22).map(a=>{const idx=result.proj.ages.indexOf(a),v=result.proj.treated[idx];return<td key={a} style={{...td,textAlign:'center',color:'#2a7d6e'}}>{v>=0?'+':''}{v?.toFixed(2)}</td>;})}</tr>}</tbody></table></div><div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}><input value={snapshotLabel} onChange={e=>setSnapshotLabel(e.target.value)} placeholder="Label (e.g. Initial assessment Jan 2023)" style={{...inputStyle,width:260,fontSize:12}} /><button onClick={saveSnapshot} style={btnStyle('#22c55e')}>Save Snapshot</button>{saved&&<span style={{fontSize:12,color:'#16a34a',fontWeight:600}}>Saved!</span>}</div></div>)}{snapshots.length>0&&(<div><div style={{fontWeight:700,fontSize:13,color:'#0f4c75',marginBottom:10}}>Saved Snapshots</div><div style={{overflowX:'auto'}}><table style={{borderCollapse:'collapse',fontSize:12,width:'100%'}}><thead><tr style={{background:'#f1f5f9'}}><th style={th}>Date</th><th style={th}>Label</th><th style={{...th,textAlign:'center'}}>Risk</th><th style={th}>Tier</th><th style={{...th,textAlign:'center'}}>Pred @18 (untx)</th><th style={{...th,textAlign:'center'}}>Pred @18 (tx)</th><th style={{...th,textAlign:'center'}}>Actual Rx</th><th style={{...th,textAlign:'center'}}>Actual AL</th><th style={th}>Intervention</th><th style={th}></th></tr></thead><tbody>{snapshots.map((snap,i)=>(<tr key={snap.id} style={{background:i%2===0?'#fff':'#f8fafc'}}><td style={{...td,whiteSpace:'nowrap'}}>{fmtDate(snap.date)}</td><td style={{...td,fontWeight:600}}>{snap.label}</td><td style={{...td,textAlign:'center'}}><span style={{fontWeight:700,color:snap.score>=70?'#c94040':snap.score>=45?'#e8a245':'#16a34a'}}>{snap.score}</span></td><td style={td}>{snap.tier}</td><td style={{...td,textAlign:'center',color:'#c94040'}}>{snap.rxAt18U>=0?'+':''}{snap.rxAt18U?.toFixed(2)}D</td><td style={{...td,textAlign:'center',color:'#2a7d6e'}}>{snap.rxAt18T!=null?`${snap.rxAt18T>=0?'+':''}${snap.rxAt18T?.toFixed(2)}D`:'--'}</td><td style={{...td,textAlign:'center'}}>{snap.actualRx!=null?`${snap.actualRx>=0?'+':''}${Number(snap.actualRx).toFixed(2)}D`:'--'}</td><td style={{...td,textAlign:'center'}}>{snap.actualAL!=null?`${snap.actualAL}mm`:'--'}</td><td style={{...td,fontSize:11}}>{CALC_INT_LABELS[snap.intervention]||snap.intervention}</td><td style={td}><button onClick={()=>removeSnapshot(snap.id)} style={{background:'#fce7f3',border:'none',borderRadius:4,padding:'2px 8px',cursor:'pointer',color:'#db2777',fontSize:11}}>Remove</button></td></tr>))}</tbody></table></div>{snapshots.length>1&&latestRx&&<div style={{marginTop:10,padding:'10px 14px',background:'#f0f9ff',borderRadius:8,border:'1px solid #bae6fd',fontSize:12,color:'#0c4a6e'}}>Current Rx (worse eye): <strong>{Math.min(latestRx.odSph,latestRx.osSph)>=0?'+':''}{Math.min(latestRx.odSph,latestRx.osSph).toFixed(2)}D</strong> ({fmtDate(latestRx.date)}). Compare Actual Rx OD across snapshots vs. predictions to track model accuracy.</div>}</div>)}</div>);
+    }
+
+    function ExportTab({ patient }) {
+      const generate = () => {
+        const als = [...(patient.alMeasurements||[])].sort((a,b) => a.date.localeCompare(b.date));
+        const rxs = [...(patient.refractions||[])].sort((a,b) => a.date.localeCompare(b.date));
+        const lines = [
+          `THE SPARK OPTOMETRY — MYOPIA MANAGEMENT REPORT`, `${"=".repeat(52)}`,
+          `Patient: ${displayName(patient.name)}`, `DOB: ${fmtDate(patient.dob)}`,
+          `Location: ${patient.location}`,
+          `Therapy: ${patient.therapy}${patient.combinationTherapy ? " + " + patient.combinationTherapy : ""}`,
+          `Status: ${patient.status}`, `Initiating Doctor: ${patient.initiatingDoctor}`,
+          `Managing Doctor: ${patient.managingDoctor || patient.initiatingDoctor}`,
+          patient.parent1Myopia ? `Parent 1 Myopia: ${patient.parent1Myopia}` : "",
+          patient.parent2Myopia ? `Parent 2 Myopia: ${patient.parent2Myopia}` : "",
+          ``, `AXIAL LENGTH MEASUREMENTS`, `${"─".repeat(40)}`,
+          ...als.map(m => `${fmtDate(m.date)}  OD: ${m.od} mm  OS: ${m.os} mm${m.notes ? "  — " + m.notes : ""}`), ``,
+          `REFRACTIONS`, `${"─".repeat(40)}`,
+          ...rxs.map(r => `${fmtDate(r.date)}  OD: ${r.odSph>=0?"+":""}${r.odSph} ${r.odCyl} x${r.odAxis}  OS: ${r.osSph>=0?"+":""}${r.osSph} ${r.osCyl} x${r.osAxis}`), ``,
+          `CLINICAL EVENTS`, `${"─".repeat(40)}`,
+          ...(patient.clinicalEvents||[]).sort((a,b) => b.date.localeCompare(a.date)).map(e => `${fmtDate(e.date)}  ${e.type}${e.notes?" — "+e.notes:""}`),
+        ].filter(l => l !== "");
+        const blob = new Blob([lines.join("\n")], { type: "text/plain" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url; a.download = `${patient.name.replace(/\s+/g,"-")}-myopia-report.txt`;
+        a.click(); URL.revokeObjectURL(url);
+      };
+      return (
+        <div>
+          <div style={{ fontSize: 13, color: "#64748b", marginBottom: 16 }}>Export a plain-text clinical summary (staff alert and notes excluded).</div>
+          <button onClick={generate} style={btnStyle("#0f4c75")}>⬇ Download Report (.txt)</button>
+        </div>
+      );
+    }
+
+    function PatientHeaderEdit({ patient, onUpdate, doctors, locations }) {
+      const [editing, setEditing] = useState(false);
+      const [form, setForm] = useState({
+        therapy: patient.therapy, combinationTherapy: patient.combinationTherapy || "",
+        status: patient.status, initiatingDoctor: patient.initiatingDoctor,
+        managingDoctor: patient.managingDoctor || patient.initiatingDoctor,
+        location: patient.location, staffAlert: patient.staffAlert || "",
+        notes: patient.notes || "", parent1Myopia: patient.parent1Myopia || "",
+        parent2Myopia: patient.parent2Myopia || "", bvRisk: patient.bvRisk || "Not assessed",
+        warrantyOrderDate: patient.warrantyOrderDate || "", therapyStartDate: patient.therapyStartDate || "",
+        atropineConc: patient.atropineConc || "", atropineConcOther: patient.atropineConcOther || "",
+      });
+      if (!editing) return <button onClick={() => setEditing(true)} style={{ marginTop: 8, background: "none", border: "1px solid #e2e8f0", borderRadius: 6, padding: "4px 12px", cursor: "pointer", fontSize: 11, color: "#64748b" }}>Edit Details</button>;
+      const save = () => { onUpdate({ ...patient, ...form }); setEditing(false); };
+      return (
+        <div style={{ marginTop: 12, background: "#f8fafc", borderRadius: 8, padding: 14 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "flex-end", marginBottom: 12 }}>
+            {[["therapy","Primary Therapy",THERAPIES],["status","Status",STATUSES],["location","Location",locations||LOCATIONS],["initiatingDoctor","Initiating Dr.",doctors||DOCTORS],["managingDoctor","Managing Dr.",doctors||DOCTORS]].map(([k,label,opts]) => (
+              <label key={k} style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 11, color: "#64748b", minWidth: 130 }}>
+                {label}<select value={form[k]} onChange={e => setForm(f => ({ ...f, [k]: e.target.value }))} style={{ padding: "5px 8px", border: "1px solid #e2e8f0", borderRadius: 5, fontSize: 12 }}>{opts.map(o => <option key={o}>{o}</option>)}</select>
+              </label>
+            ))}
+            <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 11, color: "#64748b", minWidth: 150 }}>
+              Combination Therapy<select value={form.combinationTherapy} onChange={e => setForm(f => ({ ...f, combinationTherapy: e.target.value }))} style={{ padding: "5px 8px", border: "1px solid #e2e8f0", borderRadius: 5, fontSize: 12 }}>
+                <option value="">None</option>{THERAPIES.filter(t => t !== form.therapy).map(o => <option key={o}>{o}</option>)}
+              </select>
+            </label>
+            {(form.therapy === "Atropine" || form.combinationTherapy === "Atropine") && (
+              <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 11, color: "#64748b", minWidth: 130 }}>
+                Atropine Conc.<select value={form.atropineConc} onChange={e => setForm(f => ({ ...f, atropineConc: e.target.value }))} style={{ padding: "5px 8px", border: "1px solid #e2e8f0", borderRadius: 5, fontSize: 12 }}>
+                  <option value="">Select…</option><option>0.01%</option><option>0.025%</option><option>0.05%</option><option>0.1%</option><option>Other</option>
+                </select>
+                {form.atropineConc === "Other" && <input placeholder="e.g. 0.02%" value={form.atropineConcOther} onChange={e => setForm(f => ({ ...f, atropineConcOther: e.target.value }))} style={{ padding: "5px 8px", border: "1px solid #e2e8f0", borderRadius: 5, fontSize: 12, marginTop: 4 }} />}
+              </label>
+            )}
+            <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 11, color: "#64748b" }}>
+              Therapy Start<input type="date" value={form.therapyStartDate} onChange={e => setForm(f => ({ ...f, therapyStartDate: e.target.value }))} style={{ padding: "5px 8px", border: "1px solid #e2e8f0", borderRadius: 5, fontSize: 12 }} />
+            </label>
+            {form.therapy === "Ortho-K" && (
+              <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 11, color: "#64748b" }}>
+                Warranty Order Date<input type="date" value={form.warrantyOrderDate} onChange={e => setForm(f => ({ ...f, warrantyOrderDate: e.target.value }))} style={{ padding: "5px 8px", border: "1px solid #e2e8f0", borderRadius: 5, fontSize: 12 }} />
+              </label>
+            )}
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 12 }}>
+            {[["parent1Myopia","Parent 1 Myopia"],["parent2Myopia","Parent 2 Myopia"]].map(([k,l]) => (
+              <label key={k} style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 11, color: "#64748b", minWidth: 130 }}>
+                {l}<select value={form[k]} onChange={e => setForm(f => ({ ...f, [k]: e.target.value }))} style={{ padding: "5px 8px", border: "1px solid #e2e8f0", borderRadius: 5, fontSize: 12 }}>
+                  <option value="">Unknown</option>{PARENT_MYOPIA_OPTS.map(o => <option key={o}>{o}</option>)}
+                </select>
+              </label>
+            ))}
+            <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 11, color: "#64748b", minWidth: 130 }}>
+              BV Risk<select value={form.bvRisk} onChange={e => setForm(f => ({ ...f, bvRisk: e.target.value }))} style={{ padding: "5px 8px", border: "1px solid #e2e8f0", borderRadius: 5, fontSize: 12 }}>{BV_RISK_OPTS.map(o => <option key={o}>{o}</option>)}</select>
+            </label>
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 12 }}>
+            <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 11, color: "#64748b", flex: "1 1 200px" }}>
+              ⚠️ Staff Alert<input value={form.staffAlert} onChange={e => setForm(f => ({ ...f, staffAlert: e.target.value }))} style={{ padding: "5px 8px", border: "1px solid #fcd34d", borderRadius: 5, fontSize: 12, background: "#fffbeb" }} />
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 11, color: "#64748b", flex: "2 1 300px" }}>
+              📝 Notes<textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} rows={3} style={{ padding: "5px 8px", border: "1px solid #e2e8f0", borderRadius: 5, fontSize: 12, resize: "vertical", fontFamily: "'DM Sans', sans-serif" }} />
+            </label>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={save} style={btnStyle("#0f4c75")}>Save</button>
+            <button onClick={() => setEditing(false)} style={btnStyle("#94a3b8")}>Cancel</button>
+          </div>
+        </div>
+      );
+    }
+
+    function PatientView({ patient, activeTab, setActiveTab, onBack, onUpdate, onArchive, pushUndo, undoStack, setUndoStack, doctors, locations, clinicalTypes, adminTypes, bvTests, defaultWarrantyMonths }) {
+      const TABS = ["overview","al-graph","lens-history","bv","calculator","export"];
+      const TAB_LABELS = { overview: "Overview", "al-graph": "AL Graph", "lens-history": "Lens History", bv: "BV", calculator: "📊 Calc", export: "Export" };
+      const [confirmArchive, setConfirmArchive] = useState(false);
+      return (
+        <div style={{ maxWidth: 1400, margin: "0 auto", padding: "48px 24px" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+            <button onClick={onBack} style={{ background: "none", border: "none", color: "#3b82f6", cursor: "pointer", fontSize: 13 }}>← Back</button>
+            {!confirmArchive
+              ? <button onClick={() => setConfirmArchive(true)} style={{ background: "none", border: "1px solid #e2e8f0", borderRadius: 6, padding: "4px 12px", cursor: "pointer", fontSize: 11, color: "#94a3b8" }}>Archive patient</button>
+              : <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 12, color: "#64748b" }}>Archive {displayName(patient.name)}?</span>
+                  <button onClick={() => onArchive(patient.id)} style={{ background: "#dc2626", color: "#fff", border: "none", borderRadius: 6, padding: "4px 12px", cursor: "pointer", fontSize: 11, fontWeight: 600 }}>Yes</button>
+                  <button onClick={() => setConfirmArchive(false)} style={{ background: "#94a3b8", color: "#fff", border: "none", borderRadius: 6, padding: "4px 12px", cursor: "pointer", fontSize: 11 }}>Cancel</button>
+                </div>
+            }
+          </div>
+
+          {patient.staffAlert && (
+            <div style={{ background: "#fef3c7", border: "1px solid #fcd34d", borderRadius: 8, padding: "8px 14px", marginBottom: 6, fontSize: 13, color: "#92400e" }}>
+              <span style={{ fontWeight: 700 }}>⚠️ Staff Alert:</span> {patient.staffAlert}
+            </div>
+          )}
+          {patient.notes && (
+            <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 14px", marginBottom: 6, fontSize: 13, color: "#475569" }}>
+              <span style={{ fontWeight: 700 }}>📝 Notes:</span> {patient.notes}
+            </div>
+          )}
+
+          <div style={{ background: "#fff", borderRadius: 12, boxShadow: "0 2px 10px rgba(0,0,0,0.07)", padding: "14px 18px", marginBottom: 2 }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 14, alignItems: "flex-start" }}>
+              <div style={{ flex: 1, minWidth: 200 }}>
+                <div style={{ fontWeight: 700, fontSize: 20 }}>{displayName(patient.name)}</div>
+                <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>DOB: {fmtDate(patient.dob)} · Age: {ageLabel(patient.dob)} · {patient.location}</div>
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+                <TherapyBadge therapy={patient.therapy} />
+                {patient.combinationTherapy && <><span style={{ fontSize: 10, color: "#64748b" }}>+</span><TherapyBadge therapy={patient.combinationTherapy} /><span style={{ fontSize: 10, color: "#64748b", fontStyle: "italic" }}>combo</span></>}
+                <span style={{ fontSize: 12, color: patient.status === "Active" ? "#16a34a" : "#94a3b8", border: "1px solid currentColor", borderRadius: 20, padding: "2px 9px" }}>{patient.status}</span>
+                {patient.bvRisk && patient.bvRisk !== "Not assessed" && (
+                  <span style={{ fontSize: 11, background: patient.bvRisk === "Significant" ? "#fff1f2" : patient.bvRisk === "Monitor" ? "#fef3c7" : "#f0fdf4", color: patient.bvRisk === "Significant" ? "#dc2626" : patient.bvRisk === "Monitor" ? "#92400e" : "#16a34a", border: "1px solid currentColor", borderRadius: 20, padding: "2px 9px" }}>BV: {patient.bvRisk}</span>
+                )}
+              </div>
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 14, marginTop: 8, fontSize: 12, color: "#475569" }}>
+              <span>👨‍⚕️ {patient.initiatingDoctor} (init) · {patient.managingDoctor || patient.initiatingDoctor} (managing)</span>
+              {patient.therapyStartDate && <span>📅 Tx start: <strong>{fmtDate(patient.therapyStartDate)}</strong></span>}
+              {patient.parent1Myopia && <span>👤 P1: <strong>{patient.parent1Myopia}</strong></span>}
+              {patient.parent2Myopia && <span>👤 P2: <strong>{patient.parent2Myopia}</strong></span>}
+              {(patient.therapy === "Atropine" || patient.combinationTherapy === "Atropine") && patient.atropineConc && (
+                <span>💊 <strong>{patient.atropineConc === "Other" ? (patient.atropineConcOther||"Other") : patient.atropineConc}</strong></span>
+              )}
+            </div>
+            <PatientHeaderEdit patient={patient} onUpdate={onUpdate} doctors={doctors} locations={locations} />
+          </div>
+
+          {/* Warranty banner */}
+          {(() => {
+            const info = getPatientWarrantyInfo(patient);
+            if (!info || !usesLens(patient)) return null;
+            const { expiry: expiryDt, voided, voidDate } = info;
+            if (voided) {
+              return (
+                <div style={{ background: "#f1f5f9", border: "2px solid #e2e8f0", borderRadius: 8, padding: "8px 16px", marginBottom: 4, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+                  <span style={{ fontSize: 18 }}>🚫</span>
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5, color: "#94a3b8", marginBottom: 1 }}>Lens Warranty</div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#64748b" }}>Voided{voidDate ? ` · ${fmtDate(voidDate)}` : ""}</div>
+                  </div>
+                </div>
+              );
+            }
+            const daysLeft = daysBetween(new Date(), expiryDt);
+            const c = getWarrantyColor(daysLeft);
+            const label = daysLeft < 0
+              ? `Expired ${durationLabel(expiryDt, new Date())} ago`
+              : `Expires ${fmtDate(expiryDt.toISOString().slice(0,10))} · ${durationLabel(new Date(), expiryDt)} remaining`;
+            return (
+              <div style={{
+                background: daysLeft >= 0 && daysLeft > 30 ? "#f0fdf4" : c.bg,
+                border: `2px solid ${daysLeft >= 0 && daysLeft > 30 ? "#86efac" : c.border}`,
+                borderRadius: 8, padding: "8px 16px", marginBottom: 4,
+                display: "flex", alignItems: "center", gap: 10,
+                boxShadow: "0 1px 4px rgba(0,0,0,0.06)"
+              }}>
+                <span style={{ fontSize: 18 }}>🛡</span>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5, color: daysLeft >= 0 && daysLeft > 30 ? "#16a34a" : c.text, marginBottom: 1 }}>Lens Warranty</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: daysLeft >= 0 && daysLeft > 30 ? "#15803d" : c.text }}>{label}</div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Tab bar */}
+          <div style={{ display: "flex", gap: 2, background: "#fff", padding: "0 4px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)", overflowX: "auto" }}>
+            {TABS.map(t => <button key={t} onClick={() => setActiveTab(t)} style={{ background: activeTab === t ? "#0f4c75" : "transparent", color: activeTab === t ? "#fff" : "#64748b", border: "none", borderRadius: "6px 6px 0 0", padding: "9px 14px", cursor: "pointer", fontSize: 12, fontWeight: activeTab === t ? 700 : 400, whiteSpace: "nowrap" }}>{TAB_LABELS[t]}</button>)}
+          </div>
+          <div style={{ background: "#fff", borderRadius: "0 0 12px 12px", boxShadow: "0 2px 12px rgba(0,0,0,0.07)", padding: "18px 20px", minHeight: 360 }}>
+            {activeTab === "overview"      && <OverviewTimelineTab patient={patient} onUpdate={onUpdate} pushUndo={pushUndo} undoStack={undoStack} setUndoStack={setUndoStack} clinicalTypes={clinicalTypes} adminTypes={adminTypes} />}
+            {activeTab === "al-graph"      && <ALGraphTab patient={patient} />}
+            {activeTab === "lens-history"  && <LensHistoryTab patient={patient} onUpdate={onUpdate} defaultWarrantyMonths={defaultWarrantyMonths||4} />}
+            {activeTab === "bv"            && <BVTab patient={patient} onUpdate={onUpdate} bvTests={bvTests} />}
+            {activeTab === "calculator"    && <CalculatorTab patient={patient} onUpdate={onUpdate} />}
+            {activeTab === "export"        && <ExportTab patient={patient} />}
+          </div>
+        </div>
+      );
+    }
+
+    function NewPatientModal({ onClose, onSave, doctors, locations }) {
+      const [form, setForm] = useState({ name: "", dob: "", therapyStartDate: today(), location: (locations||LOCATIONS)[0], therapy: THERAPIES[0], combinationTherapy: "", atropineConc: "", atropineConcOther: "", status: STATUSES[0], initiatingDoctor: (doctors||DOCTORS)[0], managingDoctor: (doctors||DOCTORS)[0], staffAlert: "", notes: "" });
+      const submit = () => { if (!form.name) return; onSave(form); };
+      return (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div style={{ background: "#fff", borderRadius: 14, maxWidth: 480, width: "100%", padding: 28, boxShadow: "0 8px 40px rgba(0,0,0,0.18)", maxHeight: "90vh", overflow: "auto" }}>
+            <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 18, color: "#0f4c75" }}>New Patient</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {[["name","Full Name","text"],["dob","Date of Birth","date"],["therapyStartDate","Therapy Start Date","date"]].map(([k,l,t]) => (
+                <label key={k} style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 12, color: "#64748b" }}>{l}<input type={t} value={form[k]} onChange={e => setForm(f => ({ ...f, [k]: e.target.value }))} style={{ ...inputStyle, padding: "8px 10px" }} /></label>
+              ))}
+              {[["location",locations||LOCATIONS],["therapy",THERAPIES]].map(([k,opts]) => (
+                <label key={k} style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 12, color: "#64748b" }}>
+                  {k==="therapy"?"Primary Therapy":k.charAt(0).toUpperCase()+k.slice(1)}
+                  <select value={form[k]} onChange={e => setForm(f => ({ ...f, [k]: e.target.value }))} style={{ ...inputStyle, padding: "8px 10px" }}>{opts.map(o => <option key={o}>{o}</option>)}</select>
+                </label>
+              ))}
+              <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 12, color: "#64748b" }}>
+                Combination Therapy
+                <select value={form.combinationTherapy} onChange={e => setForm(f => ({ ...f, combinationTherapy: e.target.value }))} style={{ ...inputStyle, padding: "8px 10px" }}>
+                  <option value="">None</option>
+                  {THERAPIES.filter(t => t !== form.therapy).map(o => <option key={o}>{o}</option>)}
+                </select>
+              </label>
+              {[["status",STATUSES],["initiatingDoctor",doctors||DOCTORS],["managingDoctor",doctors||DOCTORS]].map(([k,opts]) => (
+                <label key={k} style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 12, color: "#64748b" }}>
+                  {k==="initiatingDoctor"?"Initiating Doctor":k==="managingDoctor"?"Managing Doctor":k.charAt(0).toUpperCase()+k.slice(1)}
+                  <select value={form[k]} onChange={e => setForm(f => ({ ...f, [k]: e.target.value }))} style={{ ...inputStyle, padding: "8px 10px" }}>{opts.map(o => <option key={o}>{o}</option>)}</select>
+                </label>
+              ))}
+              {(form.therapy === "Atropine" || form.combinationTherapy === "Atropine") && (
+                <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 12, color: "#64748b" }}>
+                  Atropine Concentration
+                  <select value={form.atropineConc} onChange={e => setForm(f => ({ ...f, atropineConc: e.target.value }))} style={{ ...inputStyle, padding: "8px 10px" }}>
+                    <option value="">Select…</option>
+                    <option>0.01%</option><option>0.025%</option><option>0.05%</option><option>0.1%</option><option>Other</option>
+                  </select>
+                  {form.atropineConc === "Other" && <input placeholder="e.g. 0.02%" value={form.atropineConcOther} onChange={e => setForm(f => ({ ...f, atropineConcOther: e.target.value }))} style={{ ...inputStyle, padding: "8px 10px", marginTop: 4 }} />}
+                </label>
+              )}
+              <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 12, color: "#64748b" }}>Staff Alert<input value={form.staffAlert} onChange={e => setForm(f => ({ ...f, staffAlert: e.target.value }))} style={{ ...inputStyle, padding: "8px 10px" }} /></label>
+              <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 12, color: "#64748b" }}>Notes<input value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} style={{ ...inputStyle, padding: "8px 10px" }} /></label>
+            </div>
+            <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
+              <button onClick={submit} style={{ ...btnStyle("#0f4c75"), flex: 1, padding: "10px", fontSize: 14 }}>Create Patient</button>
+              <button onClick={onClose} style={{ ...btnStyle("#94a3b8"), flex: 1, padding: "10px", fontSize: 14 }}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function TypeListEditor({ title, icon, items, onChange, placeholder }) {
+      const [newItem, setNewItem] = useState("");
+      const move = (i, dir) => { const arr = [...items]; const j = i + dir; if (j < 0 || j >= arr.length) return; [arr[i], arr[j]] = [arr[j], arr[i]]; onChange(arr); };
+      return (
+        <div style={{ background: "#fff", borderRadius: 12, boxShadow: "0 2px 12px rgba(0,0,0,0.07)", padding: "20px 24px", marginBottom: 20 }}>
+          <div style={{ fontWeight: 700, fontSize: 15, color: "#0f4c75", marginBottom: 14 }}>{icon} {title}</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
+            {items.map((item, i) => (
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, background: "#f8fafc", borderRadius: 8, padding: "6px 10px", border: "1px solid #e2e8f0" }}>
+                <span style={{ flex: 1, fontSize: 13 }}>{item}</span>
+                <button onClick={() => move(i, -1)} disabled={i === 0} style={{ background: "none", border: "1px solid #e2e8f0", borderRadius: 4, padding: "2px 6px", cursor: "pointer", color: "#64748b", fontSize: 12 }}>↑</button>
+                <button onClick={() => move(i, 1)} disabled={i === items.length-1} style={{ background: "none", border: "1px solid #e2e8f0", borderRadius: 4, padding: "2px 6px", cursor: "pointer", color: "#64748b", fontSize: 12 }}>↓</button>
+                <button onClick={() => onChange(items.filter((_,j) => j !== i))} style={{ background: "#fce7f3", border: "none", borderRadius: 5, padding: "3px 8px", cursor: "pointer", color: "#db2777", fontSize: 12 }}>✕</button>
+              </div>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input value={newItem} onChange={e => setNewItem(e.target.value)} placeholder={placeholder} style={{ ...inputStyle, flex: 1 }} onKeyDown={e => { if (e.key === "Enter" && newItem.trim()) { onChange([...items, newItem.trim()]); setNewItem(""); }}} />
+            <button onClick={() => { if (newItem.trim()) { onChange([...items, newItem.trim()]); setNewItem(""); }}} style={btnStyle("#0f4c75")}>Add</button>
+          </div>
+        </div>
+      );
+    }
+
+    function ResourceEditor({ resources, onUpdate }) {
+      const [form, setForm] = useState({ label: "", category: "", url: "" });
+      const [newCat, setNewCat] = useState("");
+      const [uploading, setUploading] = useState(false);
+      const [uploadProgress, setUploadProgress] = useState(0);
+      const [uploadError, setUploadError] = useState("");
+      const fileRef = useRef(null);
+      const categories = [...new Set((resources||[]).map(r => r.category))].filter(Boolean);
+
+      const handleFileUpload = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        setUploading(true); setUploadError(""); setUploadProgress(0);
+        const { ref: storageRef, uploadBytesResumable, getDownloadURL } = window.__storageUtils;
+        const fileRef2 = storageRef(window.__storage, `resources/${Date.now()}_${file.name}`);
+        const task = uploadBytesResumable(fileRef2, file);
+        task.on("state_changed",
+          snap => setUploadProgress(Math.round(snap.bytesTransferred / snap.totalBytes * 100)),
+          err => { setUploadError("Upload failed: " + err.message); setUploading(false); },
+          async () => {
+            const url = await getDownloadURL(task.snapshot.ref);
+            setForm(f => ({ ...f, url, label: f.label || file.name.replace(/\.[^.]+$/, "").replace(/_/g, " ") }));
+            setUploading(false); setUploadProgress(0);
+          }
+        );
+      };
+
+      const add = () => {
+        if (!form.label || !form.url) return;
+        const cat = form.category || newCat || "General";
+        onUpdate([...(resources||[]), { id: uid(), label: form.label, category: cat, url: form.url }]);
+        setForm({ label: "", category: "", url: "" }); setNewCat("");
+      };
+      const remove = (id) => onUpdate((resources||[]).filter(r => r.id !== id));
+      const grouped = {};
+      (resources||[]).forEach(r => { if (!grouped[r.category]) grouped[r.category] = []; grouped[r.category].push(r); });
+
+      return (
+        <div>
+          {Object.entries(grouped).map(([cat, items]) => (
+            <div key={cat} style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", color: "#94a3b8", letterSpacing: 0.5, marginBottom: 4 }}>{cat}</div>
+              {items.map(r => (
+                <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 8px", background: "#f8fafc", borderRadius: 6, marginBottom: 3, border: "1px solid #f1f5f9" }}>
+                  <span style={{ flex: 1, fontSize: 12 }}>{r.label}</span>
+                  <span style={{ fontSize: 10, color: "#94a3b8" }}>{r.category}</span>
+                  <a href={r.url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: "#0369a1" }}>↗</a>
+                  <button onClick={() => remove(r.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#fca5a5", fontSize: 13 }}>✕</button>
+                </div>
+              ))}
+            </div>
+          ))}
+
+          {/* Add new resource */}
+          <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "12px 14px", marginTop: 10 }}>
+            <div style={{ fontWeight: 600, fontSize: 12, color: "#0f4c75", marginBottom: 10 }}>Add Resource</div>
+
+            {/* Upload button */}
+            <div style={{ marginBottom: 10 }}>
+              <input type="file" ref={fileRef} onChange={handleFileUpload} accept=".pdf,.docx,.doc,.xlsx,.pptx,.png,.jpg" style={{ display: "none" }} />
+              <button onClick={() => fileRef.current?.click()} disabled={uploading}
+                style={{ ...btnStyle(uploading ? "#94a3b8" : "#0369a1"), marginRight: 8 }}>
+                {uploading ? `Uploading ${uploadProgress}%…` : "⬆ Upload File"}
+              </button>
+              <span style={{ fontSize: 11, color: "#94a3b8" }}>or paste a URL below</span>
+              {uploading && (
+                <div style={{ marginTop: 6, background: "#e0f2fe", borderRadius: 4, height: 4, overflow: "hidden" }}>
+                  <div style={{ background: "#0369a1", height: "100%", width: `${uploadProgress}%`, transition: "width 0.3s" }} />
+                </div>
+              )}
+              {uploadError && <div style={{ fontSize: 11, color: "#dc2626", marginTop: 4 }}>{uploadError}</div>}
+              {form.url && !uploading && <div style={{ fontSize: 10, color: "#16a34a", marginTop: 4 }}>✓ File ready</div>}
+            </div>
+
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "flex-end" }}>
+              <label style={{ ...labelStyle, flex: "1 1 150px" }}>Label (display name)<input value={form.label} onChange={e => setForm(f => ({...f, label: e.target.value}))} placeholder="e.g. Ortho-K Fitting Guide" style={inputStyle} /></label>
+              <label style={{ ...labelStyle, flex: "1 1 130px" }}>Category
+                <select value={form.category} onChange={e => setForm(f => ({...f, category: e.target.value}))} style={inputStyle}>
+                  <option value="">New category…</option>
+                  {categories.map(c => <option key={c}>{c}</option>)}
+                </select>
+              </label>
+              {!form.category && <label style={{ ...labelStyle, flex: "1 1 130px" }}>New Category<input value={newCat} onChange={e => setNewCat(e.target.value)} placeholder="e.g. Clinical Protocols" style={inputStyle} /></label>}
+              <label style={{ ...labelStyle, flex: "2 1 180px" }}>URL<input value={form.url} onChange={e => setForm(f => ({...f, url: e.target.value}))} placeholder="https://… (or upload above)" style={inputStyle} /></label>
+              <button onClick={add} disabled={!form.label || !form.url} style={btnStyle(!form.label || !form.url ? "#94a3b8" : "#0f4c75")}>Add to Resources</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function UserManager({ users, onSave, onDelete }) {
+      const [form, setForm] = useState({ username: "", password: "", isAdmin: false });
+      const [editId, setEditId] = useState(null);
+      const [resetPw, setResetPw] = useState({});
+      const addUser = () => {
+        if (!form.username || !form.password) return;
+        const u = { id: uid(), username: form.username, password: form.password, isAdmin: form.isAdmin, mustChangePassword: true };
+        onSave(u); setForm({ username: "", password: "", isAdmin: false });
+      };
+      return (
+        <div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 12 }}>
+            {(users||[]).map(u => (
+              <div key={u.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 8px", background: "#f8fafc", borderRadius: 6, border: "1px solid #f1f5f9" }}>
+                <span style={{ flex: 1, fontSize: 12, fontWeight: 600 }}>{u.username}</span>
+                {u.isAdmin && <span style={{ fontSize: 10, background: "#dbeafe", color: "#1d4ed8", borderRadius: 10, padding: "1px 6px" }}>Admin</span>}
+                {editId === u.id ? (
+                  <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                    <input placeholder="New password" value={resetPw[u.id]||""} onChange={e => setResetPw(p => ({...p, [u.id]: e.target.value}))} style={{ ...inputStyle, width: 130, fontSize: 12 }} />
+                    <button onClick={() => { onSave({...u, password: resetPw[u.id], mustChangePassword: false}); setEditId(null); }} style={btnStyle("#0f4c75", true)}>Save</button>
+                    <button onClick={() => setEditId(null)} style={btnStyle("#94a3b8", true)}>Cancel</button>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", gap: 4 }}>
+                    <button onClick={() => setEditId(u.id)} style={{ background: "#e0f2fe", border: "none", borderRadius: 4, padding: "2px 8px", cursor: "pointer", color: "#0369a1", fontSize: 11 }}>Reset PW</button>
+                    {u.id !== ADMIN_ID && <button onClick={() => onDelete(u.id)} style={{ background: "#fce7f3", border: "none", borderRadius: 4, padding: "2px 8px", cursor: "pointer", color: "#db2777", fontSize: 11 }}>Revoke</button>}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "flex-end" }}>
+            <label style={{ ...labelStyle, flex: "1 1 120px" }}>Username<input value={form.username} onChange={e => setForm(f => ({...f, username: e.target.value}))} style={inputStyle} /></label>
+            <label style={{ ...labelStyle, flex: "1 1 120px" }}>Temp Password<input type="password" value={form.password} onChange={e => setForm(f => ({...f, password: e.target.value}))} style={inputStyle} /></label>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#64748b", paddingBottom: 4 }}>
+              <input type="checkbox" checked={form.isAdmin} onChange={e => setForm(f => ({...f, isAdmin: e.target.checked}))} /> Admin
+            </label>
+            <button onClick={addUser} style={btnStyle("#0f4c75", true)}>Add User</button>
+          </div>
+          <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 6 }}>New users will be prompted to set their own password on first login.</div>
+        </div>
+      );
+    }
+
+    function LoginLog() {
+      const [logs, setLogs] = useState(null);
+      useEffect(() => {
+        const fetch = async () => {
+          try {
+            const { collection, getDocs } = window.__firestore;
+            const snap = await getDocs(collection(window.__db, "spark_login_log"));
+            const items = snap.docs.map(d => d.data()).sort((a,b) => b.ts.localeCompare(a.ts)).slice(0, 50);
+            setLogs(items);
+          } catch(e) { setLogs([]); }
+        };
+        fetch();
+      }, []);
+      return (
+        <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e2e8f0", padding: "14px 16px" }}>
+          <div style={{ fontWeight: 700, fontSize: 13, color: "#0f4c75", marginBottom: 10 }}>🔐 Login Log</div>
+          {!logs && <div style={{ fontSize: 12, color: "#94a3b8" }}>Loading…</div>}
+          {logs && logs.length === 0 && <div style={{ fontSize: 12, color: "#94a3b8" }}>No logins recorded yet.</div>}
+          {logs && logs.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+              {logs.map(l => (
+                <div key={l.id} style={{ display: "flex", gap: 10, padding: "3px 6px", fontSize: 12, background: "#f8fafc", borderRadius: 5 }}>
+                  <span style={{ fontWeight: 600, color: "#0f4c75", minWidth: 80 }}>{l.userName}</span>
+                  <span style={{ color: "#64748b" }}>{new Date(l.ts).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function CompactListPanel({ title, icon, items, onChange, placeholder, addLabel }) {
+      const [newItem, setNewItem] = useState("");
+      const [dragIdx, setDragIdx] = useState(null);
+      const [overIdx, setOverIdx] = useState(null);
+
+      const handleDragStart = (i) => setDragIdx(i);
+      const handleDragOver = (e, i) => { e.preventDefault(); setOverIdx(i); };
+      const handleDrop = (e, i) => {
+        e.preventDefault();
+        if (dragIdx === null || dragIdx === i) { setDragIdx(null); setOverIdx(null); return; }
+        const arr = [...items];
+        const [moved] = arr.splice(dragIdx, 1);
+        arr.splice(i, 0, moved);
+        onChange(arr);
+        setDragIdx(null); setOverIdx(null);
+      };
+      const handleDragEnd = () => { setDragIdx(null); setOverIdx(null); };
+
+      return (
+        <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e2e8f0", padding: "12px 14px" }}>
+          <div style={{ fontWeight: 700, fontSize: 13, color: "#0f4c75", marginBottom: 8 }}>{icon} {title}</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 2, marginBottom: 8 }}>
+            {items.map((item, i) => (
+              <div key={i}
+                draggable
+                onDragStart={() => handleDragStart(i)}
+                onDragOver={e => handleDragOver(e, i)}
+                onDrop={e => handleDrop(e, i)}
+                onDragEnd={handleDragEnd}
+                style={{
+                  display: "flex", alignItems: "center", gap: 6, padding: "3px 6px",
+                  borderRadius: 5, fontSize: 12, cursor: "grab", userSelect: "none",
+                  background: overIdx === i ? "#eff6ff" : dragIdx === i ? "#f0f9ff" : "#f8fafc",
+                  border: `1px solid ${overIdx === i ? "#93c5fd" : "#f1f5f9"}`,
+                  opacity: dragIdx === i ? 0.5 : 1,
+                  transition: "background 0.1s, border 0.1s",
+                }}>
+                <span style={{ color: "#cbd5e1", fontSize: 11, flexShrink: 0 }}>⠿</span>
+                <span style={{ flex: 1 }}>{item}</span>
+                <button onClick={() => onChange(items.filter((_,j) => j !== i))}
+                  style={{ background:"none",border:"none",cursor:"pointer",color:"#fca5a5",fontSize:13,padding:"0 2px",lineHeight:1 }}>✕</button>
+              </div>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <input value={newItem} onChange={e => setNewItem(e.target.value)} placeholder={placeholder} style={{ ...inputStyle, flex: 1, fontSize: 12 }}
+              onKeyDown={e => { if (e.key === "Enter" && newItem.trim()) { onChange([...items, newItem.trim()]); setNewItem(""); }}} />
+            <button onClick={() => { if (newItem.trim()) { onChange([...items, newItem.trim()]); setNewItem(""); }}} style={btnStyle("#0f4c75", true)}>{addLabel||"Add"}</button>
+          </div>
+        </div>
+      );
+    }
+
+    function SettingsView({ doctors, locations, clinicalTypes, adminTypes, bvTests, defaultWarrantyMonths, onSave, patients, onRestore, isAdmin, users, onSaveUser, onDeleteUser, resources, onUpdateResources }) {
+      const [docList, setDocList] = useState([...doctors]);
+      const [locList, setLocList] = useState([...locations]);
+      const [clinList, setClinList] = useState([...(clinicalTypes||DEFAULT_CLINICAL_TYPES)]);
+      const [admList, setAdmList] = useState([...(adminTypes||DEFAULT_ADMIN_TYPES)]);
+      const [bvList, setBvList] = useState([...(bvTests||DEFAULT_BV_TESTS)]);
+      const [warrantyMo, setWarrantyMo] = useState(defaultWarrantyMonths||4);
+      const [saved, setSaved] = useState(false);
+      const save = async () => {
+        await onSave({ doctors: docList, locations: locList, clinicalTypes: clinList, adminTypes: admList, bvTests: bvList, warrantyMonths: warrantyMo });
+        setSaved(true); setTimeout(() => setSaved(false), 2000);
+      };
+      const archived = patients ? patients.filter(p => p.archived) : [];
+      return (
+        <div style={{ maxWidth: 1400, margin: "0 auto", padding: "48px 24px" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, gap: 16 }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 18, color: "#0f4c75" }}>⚙️ Settings</div>
+              <div style={{ fontSize: 12, color: "#64748b" }}>Manage event types, doctors, and locations</div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#64748b", whiteSpace: "nowrap" }}>
+                🛡 Default Warranty Period
+                <input type="number" step="0.5" min="0.5" value={warrantyMo} onChange={e => setWarrantyMo(parseFloat(e.target.value)||4)}
+                  style={{ width: 60, padding: "5px 8px", border: "1px solid #e2e8f0", borderRadius: 5, fontSize: 13, textAlign: "center" }} />
+                <span style={{ fontSize: 11, color: "#94a3b8" }}>months</span>
+              </label>
+              <button onClick={save} style={{ ...btnStyle("#22c55e"), fontSize: 13, padding: "8px 24px" }}>{saved ? "✓ Saved!" : "Save All Changes"}</button>
+            </div>
+          </div>
+
+          {/* Top row: clinical types + admin types */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
+            <CompactListPanel title="Clinical Event Types" icon="🩺" items={clinList} onChange={setClinList} placeholder="New clinical type…" />
+            <CompactListPanel title="Admin Event Types" icon="📋" items={admList} onChange={setAdmList} placeholder="New admin type…" />
+          </div>
+
+          {/* Second row: doctors + BV tests */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
+            <CompactListPanel title="Doctors" icon="👨‍⚕️" items={docList} onChange={setDocList} placeholder="Dr. Name…" />
+            <CompactListPanel title="BV Tests" icon="👁" items={bvList} onChange={setBvList} placeholder="New BV test…" />
+          </div>
+
+          {/* Third row: locations (half width) + archived */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
+            <CompactListPanel title="Locations" icon="📍" items={locList} onChange={setLocList} placeholder="Location name…" />
+            {archived.length > 0 && (
+              <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e2e8f0", padding: "12px 14px" }}>
+                <div style={{ fontWeight: 700, fontSize: 13, color: "#64748b", marginBottom: 8 }}>🗄 Archived ({archived.length})</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  {archived.map(p => (
+                    <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 6px", borderRadius: 5, background: "#f8fafc", border: "1px solid #f1f5f9" }}>
+                      <span style={{ flex: 1, fontSize: 12, color: "#64748b" }}>{p.name}</span>
+                      <span style={{ fontSize: 10, color: "#94a3b8" }}>{p.therapy}</span>
+                      <button onClick={() => onRestore(p.id)} style={{ background: "#d1fae5", border: "none", borderRadius: 4, padding: "2px 8px", cursor: "pointer", color: "#065f46", fontSize: 11, fontWeight: 600 }}>Restore</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div style={{ textAlign: "right" }}>
+            <button onClick={save} style={{ ...btnStyle("#22c55e"), fontSize: 13, padding: "8px 24px" }}>{saved ? "✓ Saved!" : "Save All Changes"}</button>
+          </div>
+
+          {/* Admin-only sections */}
+          {isAdmin && (
+            <div style={{ marginTop: 20 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 12 }}>Admin Only</div>
+
+              {/* Resources management */}
+              <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e2e8f0", padding: "14px 16px", marginBottom: 14 }}>
+                <div style={{ fontWeight: 700, fontSize: 13, color: "#0f4c75", marginBottom: 10 }}>📚 Resources</div>
+                <ResourceEditor resources={resources} onUpdate={onUpdateResources} />
+              </div>
+
+              {/* User management */}
+              <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e2e8f0", padding: "14px 16px", marginBottom: 14 }}>
+                <div style={{ fontWeight: 700, fontSize: 13, color: "#0f4c75", marginBottom: 10 }}>👥 Users</div>
+                <UserManager users={users} onSave={onSaveUser} onDelete={onDeleteUser} />
+              </div>
+
+              {/* Login log */}
+              <LoginLog />
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ── User auth helpers ────────────────────────────────────────────────────
+    async function loadUsers() {
+      try {
+        const { collection, getDocs } = window.__firestore;
+        const snap = await getDocs(collection(window.__db, "spark_users"));
+        if (!snap.empty) return snap.docs.map(d => d.data());
+      } catch(e) { console.error(e); }
+      return null;
+    }
+    async function saveUser(user) {
+      try {
+        const { doc, setDoc } = window.__firestore;
+        await setDoc(doc(window.__db, "spark_users", user.id), user);
+      } catch(e) { console.error(e); }
+    }
+    async function deleteUser(id) {
+      try {
+        const { doc: docFn, deleteDoc: delDoc } = window.__firestore;
+        await delDoc(docFn(window.__db, "spark_users", id));
+      } catch(e) { console.error(e); }
+    }
+    async function logLogin(userId, userName) {
+      try {
+        const { doc, setDoc } = window.__firestore;
+        const id = uid();
+        await setDoc(doc(window.__db, "spark_login_log", id), { id, userId, userName, ts: new Date().toISOString() });
+      } catch(e) { console.error(e); }
+    }
+
+    const ADMIN_ID = "admin";
+
+    function LoginScreen({ onLogin, users }) {
+      const [username, setUsername] = useState("");
+      const [password, setPassword] = useState("");
+      const [error, setError] = useState("");
+      const [changingPw, setChangingPw] = useState(false);
+      const [newPw, setNewPw] = useState("");
+      const [newPw2, setNewPw2] = useState("");
+      const [pendingUser, setPendingUser] = useState(null);
+
+      const submit = () => {
+        const u = users.find(u => u.username.toLowerCase() === username.trim().toLowerCase());
+        if (!u) { setError("User not found."); return; }
+        if (u.password !== password) { setError("Incorrect password."); return; }
+        if (u.mustChangePassword) { setPendingUser(u); setChangingPw(true); return; }
+        logLogin(u.id, u.username);
+        onLogin(u);
+      };
+
+      const submitPwChange = () => {
+        if (newPw.length < 4) { setError("Password must be at least 4 characters."); return; }
+        if (newPw !== newPw2) { setError("Passwords don't match."); return; }
+        const updated = { ...pendingUser, password: newPw, mustChangePassword: false };
+        saveUser(updated);
+        logLogin(updated.id, updated.username);
+        onLogin(updated);
+      };
+
+      const logoBox = { background: "#1e90b8", borderRadius: 12, width: 52, height: 52, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, fontWeight: 700, color: "#fff", letterSpacing: 1, margin: "0 auto 16px" };
+      const card = { background: "#fff", borderRadius: 16, padding: "40px 36px", boxShadow: "0 8px 40px rgba(0,0,0,0.12)", maxWidth: 360, width: "100%", textAlign: "center" };
+      const iStyle = { width: "100%", padding: "11px 14px", fontSize: 15, border: "2px solid #e2e8f0", borderRadius: 8, outline: "none", fontFamily: "'DM Sans', sans-serif", boxSizing: "border-box", marginBottom: 10, textAlign: "center" };
+
+      if (changingPw) return (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh", background: "#f0f4f8" }}>
+          <div style={card}>
+            <div style={logoBox}>MM</div>
+            <div style={{ fontWeight: 700, fontSize: 18, color: "#0f4c75", marginBottom: 4 }}>Set Your Password</div>
+            <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 24 }}>First login — please set a new password</div>
+            <input type="password" value={newPw} onChange={e => setNewPw(e.target.value)} placeholder="New password" autoFocus style={iStyle} />
+            <input type="password" value={newPw2} onChange={e => setNewPw2(e.target.value)} placeholder="Confirm password" onKeyDown={e => e.key === "Enter" && submitPwChange()} style={iStyle} />
+            {error && <div style={{ color: "#dc2626", fontSize: 13, marginBottom: 10 }}>{error}</div>}
+            <button onClick={submitPwChange} style={{ ...btnStyle("#0f4c75"), width: "100%", padding: "11px", fontSize: 14 }}>Set Password & Sign In</button>
+          </div>
+        </div>
+      );
+
+      return (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh", background: "#f0f4f8" }}>
+          <div style={card}>
+            <div style={logoBox}>MM</div>
+            <div style={{ fontWeight: 700, fontSize: 18, color: "#0f4c75", marginBottom: 4 }}>Myopia Management</div>
+            <div style={{ fontSize: 12, color: "#94a3b8", letterSpacing: 1, marginBottom: 28 }}>THE SPARK OPTOMETRY</div>
+            <input value={username} onChange={e => setUsername(e.target.value)} placeholder="Username" autoFocus style={{ ...iStyle, letterSpacing: 0 }} />
+            <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Password" onKeyDown={e => e.key === "Enter" && submit()} style={{ ...iStyle, letterSpacing: 2 }} />
+            {error && <div style={{ color: "#dc2626", fontSize: 13, marginBottom: 10 }}>{error}</div>}
+            <button onClick={submit} style={{ ...btnStyle("#0f4c75"), width: "100%", padding: "11px", fontSize: 14 }}>Sign In</button>
+          </div>
+        </div>
+      );
+    }
+
+    // ── Sidebar ───────────────────────────────────────────────────────────────
+    function Sidebar({ view, setView, setShowNewPatient, currentUser, onLogout, resources, sidebarOpen, setSidebarOpen }) {
+      const [resourcesOpen, setResourcesOpen] = useState(true);
+      const W = sidebarOpen ? 220 : 52;
+
+      const navItem = (icon, label, active, onClick) => (
+        <button onClick={onClick} title={!sidebarOpen ? label : ""} style={{
+          display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "9px 12px",
+          background: active ? "rgba(255,255,255,0.15)" : "transparent",
+          border: "none", borderRadius: 8, cursor: "pointer", color: "#fff",
+          fontSize: 13, fontWeight: active ? 700 : 400, textAlign: "left",
+          transition: "background 0.15s", marginBottom: 2,
+        }}
+          onMouseEnter={e => { if (!active) e.currentTarget.style.background = "rgba(255,255,255,0.08)"; }}
+          onMouseLeave={e => { if (!active) e.currentTarget.style.background = "transparent"; }}>
+          <span style={{ fontSize: 16, flexShrink: 0, width: 20, textAlign: "center" }}>{icon}</span>
+          {sidebarOpen && <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>}
+        </button>
+      );
+
+      // Group resources by category
+      const grouped = {};
+      (resources||[]).forEach(r => { if (!grouped[r.category]) grouped[r.category] = []; grouped[r.category].push(r); });
+
+      return (
+        <div style={{ width: W, minWidth: W, background: "#0f4c75", display: "flex", flexDirection: "column", height: "100vh", position: "sticky", top: 0, transition: "width 0.2s", overflow: "hidden", flexShrink: 0 }}>
+          {/* Logo */}
+          <div style={{ padding: "16px 12px 12px", display: "flex", alignItems: "center", gap: 10, borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
+            <div style={{ background: "#1e90b8", borderRadius: 8, width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: "#fff", flexShrink: 0 }}>MM</div>
+            {sidebarOpen && <div>
+              <div style={{ fontWeight: 700, fontSize: 13, color: "#fff", lineHeight: 1.2 }}>Myopia Management</div>
+              <div style={{ fontSize: 9, color: "rgba(255,255,255,0.6)", letterSpacing: 0.8 }}>THE SPARK OPTOMETRY</div>
+            </div>}
+          </div>
+
+          {/* Nav items */}
+          <div style={{ flex: 1, padding: "10px 8px", overflowY: "auto" }}>
+            {navItem("🏠", "Home", view === "home" || view === "patient", () => { setView("home"); })}
+            {navItem("➕", "New Patient", false, () => setShowNewPatient(true))}
+
+            {/* Resources */}
+            <div>
+              <button onClick={() => sidebarOpen && setResourcesOpen(v => !v)} title={!sidebarOpen ? "Resources" : ""}
+                style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "9px 12px", background: "transparent", border: "none", borderRadius: 8, cursor: "pointer", color: "#fff", fontSize: 13, fontWeight: 400, textAlign: "left", marginBottom: 2 }}
+                onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.08)"}
+                onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                <span style={{ fontSize: 16, flexShrink: 0, width: 20, textAlign: "center" }}>📚</span>
+                {sidebarOpen && <><span style={{ flex: 1 }}>Resources</span><span style={{ fontSize: 10 }}>{resourcesOpen ? "▲" : "▼"}</span></>}
+              </button>
+              {sidebarOpen && resourcesOpen && (
+                <div style={{ marginLeft: 8, marginBottom: 4 }}>
+                  {Object.keys(grouped).length === 0 && <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", padding: "4px 12px" }}>No resources yet</div>}
+                  {Object.entries(grouped).map(([cat, items]) => (
+                    <div key={cat}>
+                      <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: "rgba(255,255,255,0.4)", padding: "6px 12px 3px" }}>{cat}</div>
+                      {items.map((r, i) => (
+                        <a key={i} href={r.url} target="_blank" rel="noreferrer"
+                          style={{ display: "block", padding: "6px 12px", fontSize: 12, color: "rgba(255,255,255,0.8)", textDecoration: "none", borderRadius: 6, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                          onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.1)"}
+                          onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                          📄 {r.label}
+                        </a>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Bottom: user + settings */}
+          <div style={{ padding: "8px 8px 12px", borderTop: "1px solid rgba(255,255,255,0.1)" }}>
+            {navItem("⚙️", "Settings", view === "settings", () => setView("settings"))}
+            {sidebarOpen && currentUser && (
+              <div style={{ padding: "8px 12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div>
+                  <div style={{ fontSize: 12, color: "#fff", fontWeight: 600 }}>{currentUser.username}</div>
+                  {currentUser.isAdmin && <div style={{ fontSize: 9, color: "rgba(255,255,255,0.5)", textTransform: "uppercase", letterSpacing: 0.5 }}>Admin</div>}
+                </div>
+                <button onClick={onLogout} style={{ background: "rgba(255,255,255,0.1)", border: "none", borderRadius: 5, padding: "3px 8px", cursor: "pointer", color: "rgba(255,255,255,0.7)", fontSize: 11 }}>Out</button>
+              </div>
+            )}
+          </div>
+
+          {/* Collapse toggle */}
+          <button onClick={() => setSidebarOpen(v => !v)}
+            style={{ position: "absolute", bottom: 60, right: -10, background: "#0f4c75", border: "1px solid rgba(255,255,255,0.2)", borderRadius: "50%", width: 20, height: 20, cursor: "pointer", color: "#fff", fontSize: 10, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10 }}>
+            {sidebarOpen ? "◀" : "▶"}
+          </button>
+        </div>
+      );
+    }
+
+    function MyopiaTracker() {
+      const [currentUser, setCurrentUser] = useState(() => { try { const u = sessionStorage.getItem("spark-user"); return u ? JSON.parse(u) : null; } catch { return null; } });
+      const [users, setUsers] = useState(null);
+      const [usersLoaded, setUsersLoaded] = useState(false);
+      const [patients, setPatients] = useState([]);
+      const [loaded, setLoaded] = useState(false);
+      const [view, setView] = useState("home");
+      const [doctors, setDoctors] = useState(null);
+      const [locations, setLocations] = useState(null);
+      const [clinicalTypes, setClinicalTypes] = useState(null);
+      const [adminTypes, setAdminTypes] = useState(null);
+      const [bvTests, setBvTests] = useState(null);
+      const [defaultWarrantyMonths, setDefaultWarrantyMonths] = useState(4);
+      const [queueIds, setQueueIds] = useState([]);
+      const [resources, setResources] = useState([]);
+      const [sidebarOpen, setSidebarOpen] = useState(true);
+      const [selectedId, setSelectedId] = useState(null);
+      const [searchQ, setSearchQ] = useState("");
+      const [activeTab, setActiveTab] = useState("overview");
+      const [showNewPatient, setShowNewPatient] = useState(false);
+      const [undoStack, setUndoStack] = useState([]);
+
+      useEffect(() => {
+        const init = async () => {
+          // Load users first
+          let loadedUsers = await loadUsers();
+          if (!loadedUsers || loadedUsers.length === 0) {
+            // Create default admin user
+            const adminUser = { id: ADMIN_ID, username: "admin", password: "Target123", isAdmin: true, mustChangePassword: false };
+            await saveUser(adminUser);
+            loadedUsers = [adminUser];
+          }
+          setUsers(loadedUsers);
+          setUsersLoaded(true);
+
+          const [pts, docVal, locVal, clinVal, admVal, bvVal, queueVal, warrantyVal, resourcesVal] = await Promise.all([
+            loadPatients(),
+            loadSetting("spark-doctors"),
+            loadSetting("spark-locations"),
+            loadSetting("spark-clinical-types"),
+            loadSetting("spark-admin-types"),
+            loadSetting("spark-bv-tests"),
+            loadSetting("spark-queue"),
+            loadSetting("spark-warranty-months"),
+            loadSetting("spark-resources"),
+          ]);
+          setPatients(pts || DEMO_PATIENTS);
+          setDoctors(docVal ? JSON.parse(docVal) : [...DOCTORS]);
+          setLocations(locVal ? JSON.parse(locVal) : [...LOCATIONS]);
+          setClinicalTypes(clinVal ? JSON.parse(clinVal) : [...DEFAULT_CLINICAL_TYPES]);
+          const loadedAdm = admVal ? JSON.parse(admVal) : [...DEFAULT_ADMIN_TYPES];
+          if (!loadedAdm.includes("Ortho-K Back-up Pair Ordered")) {
+            const idx = loadedAdm.indexOf("Ortho-K Warranty Expiry");
+            if (idx >= 0) loadedAdm.splice(idx, 0, "Ortho-K Back-up Pair Ordered");
+            else loadedAdm.push("Ortho-K Back-up Pair Ordered");
+          }
+          setAdminTypes(loadedAdm);
+          setBvTests(bvVal ? JSON.parse(bvVal) : [...DEFAULT_BV_TESTS]);
+          setQueueIds(queueVal ? JSON.parse(queueVal) : []);
+          setDefaultWarrantyMonths(warrantyVal ? parseFloat(warrantyVal) : 4);
+          setResources(resourcesVal ? JSON.parse(resourcesVal) : [
+            { id: uid(), category: "Training Guides", label: "Myopia Management Training Guide 2026", url: "https://firebasestorage.googleapis.com/v0/b/myopia--program-tracker.firebasestorage.app/o/MyopiaManagement_TrainingGuide_2026.docx.pdf?alt=media&token=9e9a6786-1a5b-4ad5-97ab-0108bd79bace" }
+          ]);
+          setLoaded(true);
+          document.getElementById("loading").style.display = "none";
+        };
+        if (window.__firebaseReady) init();
+        else window.addEventListener("firebaseReady", init);
+      }, []);
+
+      const save = useCallback((pts) => { setPatients(pts); savePatients(pts); }, []);
+      const updatePatient = useCallback((updated) => { save(patients.map(p => p.id === updated.id ? updated : p)); }, [patients, save]);
+      const pushUndo = (action) => setUndoStack(s => [...s.slice(-9), action]);
+      const selectedPatient = patients.find(p => p.id === selectedId);
+
+      const updateQueue = (ids) => { setQueueIds(ids); saveSetting("spark-queue", JSON.stringify(ids)); };
+      const addToQueue = (id) => { if (!queueIds.includes(id)) updateQueue([...queueIds, id]); };
+      const removeFromQueue = (id) => updateQueue(queueIds.filter(x => x !== id));
+      const clearQueue = () => updateQueue([]);
+
+      const handleLogin = (user) => {
+        setCurrentUser(user);
+        sessionStorage.setItem("spark-user", JSON.stringify(user));
+      };
+      const handleLogout = () => {
+        setCurrentUser(null);
+        sessionStorage.removeItem("spark-user");
+      };
+      const updateResources = (res) => { setResources(res); saveSetting("spark-resources", JSON.stringify(res)); };
+
+      if (!usersLoaded) return null;
+      if (!currentUser) return <LoginScreen onLogin={handleLogin} users={users||[]} />;
+      if (!loaded) return null;
+
+      const alerts = getAlerts(patients);
+      const activePts = patients.filter(p => !p.archived);
+
+      const handleSaveSettings = async ({ doctors: d, locations: l, clinicalTypes: c, adminTypes: a, bvTests: b, warrantyMonths: wm }) => {
+        setDoctors(d); setLocations(l); setClinicalTypes(c); setAdminTypes(a); setBvTests(b);
+        if (wm !== undefined) setDefaultWarrantyMonths(wm);
+        await Promise.all([
+          saveSetting("spark-doctors", JSON.stringify(d)),
+          saveSetting("spark-locations", JSON.stringify(l)),
+          saveSetting("spark-clinical-types", JSON.stringify(c)),
+          saveSetting("spark-admin-types", JSON.stringify(a)),
+          saveSetting("spark-bv-tests", JSON.stringify(b)),
+          saveSetting("spark-warranty-months", String(wm ?? 4)),
+        ]);
+      };
+
+      return (
+        <div style={{ fontFamily: "'DM Sans', sans-serif", background: "#f0f4f8", minHeight: "100vh", color: "#1e293b", display: "flex" }}>
+          <Sidebar view={view} setView={(v) => { setView(v); if (v !== "patient") setSelectedId(null); }}
+            setShowNewPatient={setShowNewPatient} currentUser={currentUser} onLogout={handleLogout}
+            resources={resources} sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} />
+
+          <div style={{ flex: 1, minWidth: 0, overflowY: "auto" }}>
+            {showNewPatient && <NewPatientModal onClose={() => setShowNewPatient(false)} doctors={doctors||DOCTORS} locations={locations||LOCATIONS}
+              onSave={(p) => {
+                const np = { ...p, id: uid(), alMeasurements: [], refractions: [], lensHistory: [], clinicalEvents: [], adminEvents: [], bvEntries: [], dismissedAlerts: [], warrantyOrderDate: null };
+                save([...patients, np]); setShowNewPatient(false); setSelectedId(np.id); setView("patient"); setActiveTab("overview");
+              }} />}
+
+            {view === "home" && (
+              <HomeView alerts={alerts} searchQ={searchQ} setSearchQ={setSearchQ} patients={activePts}
+                onSelect={(id) => { setSelectedId(id); setView("patient"); setActiveTab("overview"); setSearchQ(""); }}
+                onDismissAlert={(alertId, patientId) => { const p = patients.find(x => x.id === patientId); if (!p) return; updatePatient({ ...p, dismissedAlerts: [...(p.dismissedAlerts||[]), alertId] }); }}
+                queueIds={queueIds} onAddToQueue={addToQueue} onRemoveFromQueue={removeFromQueue} onClearQueue={clearQueue}
+              />
+            )}
+
+            {view === "settings" && <SettingsView
+              doctors={doctors||DOCTORS} locations={locations||LOCATIONS}
+              clinicalTypes={clinicalTypes||DEFAULT_CLINICAL_TYPES} adminTypes={adminTypes||DEFAULT_ADMIN_TYPES}
+              bvTests={bvTests||DEFAULT_BV_TESTS} defaultWarrantyMonths={defaultWarrantyMonths}
+              onSave={handleSaveSettings} patients={patients}
+              onRestore={(id) => { const p = patients.find(x => x.id === id); if(p) updatePatient({...p, archived: false}); }}
+              isAdmin={currentUser?.isAdmin}
+              users={users||[]}
+              onSaveUser={async (u) => { await saveUser(u); setUsers(prev => { const existing = prev.find(x => x.id === u.id); return existing ? prev.map(x => x.id === u.id ? u : x) : [...prev, u]; }); }}
+              onDeleteUser={async (id) => { await deleteUser(id); setUsers(prev => prev.filter(x => x.id !== id)); }}
+              resources={resources} onUpdateResources={updateResources}
+            />}
+
+            {view === "patient" && selectedId && selectedPatient && (
+              <PatientView patient={selectedPatient} activeTab={activeTab} setActiveTab={setActiveTab}
+                onBack={() => { setView("home"); setSelectedId(null); }}
+                onUpdate={updatePatient}
+                onArchive={(id) => { const p = patients.find(x => x.id === id); if(p) { updatePatient({...p, archived: true}); setView("home"); setSelectedId(null); } }}
+                pushUndo={pushUndo} undoStack={undoStack} setUndoStack={setUndoStack}
+                doctors={doctors||DOCTORS} locations={locations||LOCATIONS}
+                clinicalTypes={clinicalTypes||DEFAULT_CLINICAL_TYPES}
+                adminTypes={adminTypes||DEFAULT_ADMIN_TYPES}
+                bvTests={bvTests||DEFAULT_BV_TESTS}
+                defaultWarrantyMonths={defaultWarrantyMonths}
+              />
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(<MyopiaTracker />);
+  </script>
+</body>
+</html>
